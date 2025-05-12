@@ -1,6 +1,15 @@
-from datetime import datetime
 import json
 import math
+
+from art.errors import UnsupportedLoRADeploymentProviderError
+from art.utils.deploy_model import (
+    LoRADeploymentJob,
+    LoRADeploymentProvider,
+    check_together_job_status,
+    deploy_together,
+    find_existing_together_job_id,
+    wait_for_together_job,
+)
 from art.utils.old_benchmarking.calculate_step_metrics import calculate_step_std_dev
 from art.utils.output_dirs import (
     get_default_art_path,
@@ -38,7 +47,11 @@ from .checkpoints import (
     delete_checkpoints,
     get_step,
 )
-from art.utils.s3 import pull_model_from_s3, push_model_to_s3
+from art.utils.s3 import (
+    archive_and_presign_step_url,
+    pull_model_from_s3,
+    push_model_to_s3,
+)
 
 
 class LocalBackend(Backend):
@@ -378,4 +391,73 @@ class LocalBackend(Backend):
             verbose=verbose,
             delete=delete,
             art_path=self._path,
+        )
+
+    async def _experimental_deploy(
+        self,
+        deploy_to: LoRADeploymentProvider,
+        model: TrainableModel,
+        step: int | None = None,
+        s3_bucket: str | None = None,
+        prefix: str | None = None,
+        verbose: bool = False,
+        pull_s3: bool = True,
+        wait_for_completion: bool = True,
+    ) -> LoRADeploymentJob:
+        """
+        Deploy the model's latest checkpoint to a hosted inference endpoint.
+
+        Together is currently the only supported provider. See link for supported base models:
+        https://docs.together.ai/docs/lora-inference#supported-base-models
+        """
+        if pull_s3:
+            # pull the latest step from S3
+            await self._experimental_pull_from_s3(
+                model,
+                s3_bucket=s3_bucket,
+                prefix=prefix,
+                verbose=verbose,
+            )
+
+        if step is None:
+            step = self.__get_step(model)
+
+        presigned_url = await archive_and_presign_step_url(
+            model_name=model.name,
+            project=model.project,
+            step=step,
+            s3_bucket=s3_bucket,
+            prefix=prefix,
+            verbose=verbose,
+        )
+
+        if deploy_to == LoRADeploymentProvider.TOGETHER:
+            existing_job_id = await find_existing_together_job_id(model, step)
+            existing_job = None
+            if existing_job_id is not None:
+                existing_job = await check_together_job_status(
+                    existing_job_id, verbose=verbose
+                )
+
+            if not existing_job or existing_job.status == "Failed":
+                deployment_result = await deploy_together(
+                    model=model,
+                    presigned_url=presigned_url,
+                    step=step,
+                    verbose=verbose,
+                )
+                job_id = deployment_result["data"]["job_id"]
+            else:
+                job_id = existing_job_id
+                print(
+                    f"Previous deployment for {model.name} at step {step} has status '{existing_job.status}', skipping redployment"
+                )
+
+            if wait_for_completion:
+                return await wait_for_together_job(job_id, verbose=verbose)
+            else:
+                return await check_together_job_status(job_id, verbose=verbose)
+
+        raise UnsupportedLoRADeploymentProviderError(
+            f"Unsupported deployment option: {deploy_to}"
         )

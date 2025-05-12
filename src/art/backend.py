@@ -4,6 +4,7 @@ from tqdm import auto as tqdm
 from typing import AsyncIterator, TYPE_CHECKING
 
 from art.utils import log_http_errors
+from art.utils.deploy_model import LoRADeploymentJob
 
 from . import dev
 from .trajectories import TrajectoryGroup
@@ -11,6 +12,7 @@ from .types import TrainConfig
 
 if TYPE_CHECKING:
     from .model import Model, TrainableModel
+    from art.utils.deploy_model import LoRADeploymentProvider
 
 
 class Backend:
@@ -80,6 +82,7 @@ class Backend:
                 "trajectory_groups": [tg.model_dump() for tg in trajectory_groups],
                 "split": split,
             },
+            timeout=None,
         )
         response.raise_for_status()
 
@@ -165,3 +168,38 @@ class Backend:
             timeout=600,
         )
         response.raise_for_status()
+
+    @log_http_errors
+    async def _experimental_deploy(
+        self,
+        deploy_to: "LoRADeploymentProvider",
+        model: "Model",
+        step: int | None = None,
+        s3_bucket: str | None = None,
+        prefix: str | None = None,
+        verbose: bool = False,
+        pull_s3: bool = True,
+        wait_for_completion: bool = True,
+    ) -> LoRADeploymentJob:
+        """
+        Deploy the model's latest checkpoint to a hosted inference endpoint.
+
+        Together is currently the only supported provider. See link for supported base models:
+        https://docs.together.ai/docs/lora-inference#supported-base-models
+        """
+        response = await self._client.post(
+            "/_experimental_deploy",
+            json={
+                "deploy_to": deploy_to,
+                "model": model.model_dump(),
+                "step": step,
+                "s3_bucket": s3_bucket,
+                "prefix": prefix,
+                "verbose": verbose,
+                "pull_s3": pull_s3,
+                "wait_for_completion": wait_for_completion,
+            },
+            timeout=600,
+        )
+        response.raise_for_status()
+        return LoRADeploymentJob(**response.json())

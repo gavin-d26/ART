@@ -8,7 +8,7 @@
 <a href="https://discord.gg/zbBHRUpwf4"><img src="https://github.com/openpipe/art/raw/main/assets/Discord_pill.png" height="48"></a>
 <a href="https://openpipe.ai/blog/art-e-mail-agent"><img src="https://github.com/openpipe/art/raw/main/assets/ART_E_pill.png" height="48"></a>
 
-### Train GRPO-powered RL agents with minimal code changes and maximal performance!
+### Train GRPO-powered RL agents for real-world tasks!
 
 ![](https://github.com/openpipe/art/raw/main/assets/Header_separator.png)
 
