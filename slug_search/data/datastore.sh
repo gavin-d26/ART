@@ -1,10 +1,6 @@
 #!/bin/bash
 
-# Activate the conda environment
-# conda init && conda activate art
-
-# Script to run the Python datastore script with example arguments.
-# Adjust the arguments below as needed for your use case.
+# creates a milvus datastore for the hotpotqa dataset
 
 SCRIPT_DIR=$(dirname "$0")
 python "$SCRIPT_DIR/datastore.py" \
@@ -14,12 +10,18 @@ python "$SCRIPT_DIR/datastore.py" \
     --milvus_db_path "slug_search/data/milvus_hotpotqa.db" \
     --model "BAAI/bge-large-en-v1.5" \
     --drop_old_db \
-    --max_docs 1 \
-    --gpu-memory-utilization 0.3 \
-    # --metadata_columns id title \
-    
-    # Add other VLLM or script-specific arguments here if needed
-    # Example: --tensor_parallel_size 1
-    # Example: --embedding_dim 4096
+    --gpu-memory-utilization 0.4 \
+    # --max_docs 1 \
 
-echo "Datastore script execution finished."
+echo "Datastore script execution finished for train split."
+
+
+python "$SCRIPT_DIR/datastore.py" \
+    --dataset_name "lucadiliello/hotpotqa" \
+    --split_name "validation" \
+    --text_column "context" \
+    --milvus_db_path "slug_search/data/milvus_hotpotqa.db" \
+    --model "BAAI/bge-large-en-v1.5" \
+    --gpu-memory-utilization 0.4 \
+
+echo "Datastore script execution finished for validation split."

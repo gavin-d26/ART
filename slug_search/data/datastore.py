@@ -55,12 +55,6 @@ def parse_args():
         default=[],
         help="List of column names from the dataset to include as metadata.",
     )
-    parser.add_argument(
-        "--embedding_dim",
-        type=int,
-        default=None,
-        help="Dimension of the embeddings. Required by Milvus if creating a new collection and cannot infer. If not provided, it will be inferred from the first embedding.",
-    )
 
     # Add VLLM engine arguments to the parser
     parser = EngineArgs.add_cli_args(parser)
@@ -94,13 +88,13 @@ def load_hf_dataset_to_dataframe(
 
 
 # --- Text Preprocessing/Chunking ---
-def preprocess_and_chunk_text(text: str, **kwargs) -> List[str]:
+def preprocess_and_chunk_text(text: str, chunk_size: int = 256) -> List[str]:
     """
     Preprocesses text from a single document and optionally chunks it.
-    Implement your custom chunking logic here.
     """
-    # Placeholder: returns the text as a single chunk
-    return [text]
+    if not text or not isinstance(text, str):
+        return []  # Return empty list if text is invalid
+    return [text[i : i + chunk_size] for i in range(0, len(text), chunk_size)]
 
 
 # --- Main Processing Logic ---
@@ -158,9 +152,6 @@ if __name__ == "__main__":
     print(f"  Metadata Columns: {args.metadata_columns}")
     print(f"  Milvus DB Path: {args.milvus_db_path}, Drop Old: {args.drop_old_db}")
     print(f"  VLLM Model: {args.model}")
-    print(
-        f"  Embedding Dimension: {args.embedding_dim if args.embedding_dim else 'Will be inferred'}"
-    )
     print(f"  Max Documents: {args.max_docs if args.max_docs else 'All'}")
     print(f"  VLLM Task: {args.task}")
     print(f"  VLLM Enforce Eager: {args.enforce_eager}")
@@ -213,7 +204,6 @@ if __name__ == "__main__":
             "max_docs",
             "drop_old_db",
             "metadata_columns",
-            "embedding_dim",
         }
 
         # Filter arguments to pass only VLLM-relevant ones.
@@ -257,7 +247,6 @@ if __name__ == "__main__":
 
     print(f"Embedding {len(texts_to_embed)} document contents using VLLM...")
     documents_with_embeddings = []
-    actual_embedding_dim = None
 
     try:
         embedding_outputs = vllm_model_instance.embed(texts_to_embed)
@@ -291,38 +280,6 @@ if __name__ == "__main__":
             )
             exit()
 
-        # Determine actual_embedding_dim from the first successful embedding
-        if documents_with_embeddings[0].embedding:
-            actual_embedding_dim = len(documents_with_embeddings[0].embedding)
-            print(
-                f"Embedding successful. Dimension of first embedding: {actual_embedding_dim}"
-            )
-        else:  # Should not happen if the list is not empty and embeddings are valid
-            print(
-                "Error: Could not determine embedding dimension. First document has no embedding."
-            )
-            exit()
-
-        # If embedding_dim was not provided by user, use the actual one for Milvus
-        # If it was provided, verify it matches actual_embedding_dim
-        final_embedding_dim = actual_embedding_dim
-        if args.embedding_dim:
-            if args.embedding_dim != actual_embedding_dim:
-                print(
-                    f"Warning: User-provided --embedding_dim ({args.embedding_dim}) does not match "
-                    f"actual embedding dimension ({actual_embedding_dim}). Using actual dimension: {actual_embedding_dim}."
-                )
-            else:
-                final_embedding_dim = (
-                    args.embedding_dim
-                )  # Use user-provided if it matches
-
-        if not final_embedding_dim:
-            print(
-                "Error: Embedding dimension could not be determined. This is required for Milvus."
-            )
-            exit()
-
     except Exception as e:
         import traceback
 
@@ -341,10 +298,6 @@ if __name__ == "__main__":
         "connection_args": {"uri": args.milvus_db_path},
         "drop_old": args.drop_old_db,
     }
-
-    # final_embedding_dim is guaranteed to be set here if the script hasn't exited.
-    # It incorporates args.embedding_dim logic already.
-    # milvus_init_kwargs["embedding_dim"] = final_embedding_dim
 
     document_store = MilvusDocumentStore(**milvus_init_kwargs)
     print("MilvusDocumentStore initialized.")

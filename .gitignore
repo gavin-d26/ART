@@ -17,4 +17,5 @@ data/
 *.ipynb
 .cursor
 .vscode/
+logs/
 
