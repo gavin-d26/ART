@@ -31,6 +31,8 @@ dependencies = [
 slug = [
     "pymilvus",
     "milvus-haystack",
+    "haystack-ai>=2.13.1",
+    "haystack-experimental>=0.9.0",
 ]
 
 [project.scripts]

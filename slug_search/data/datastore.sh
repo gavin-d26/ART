@@ -12,10 +12,10 @@ python "$SCRIPT_DIR/datastore.py" \
     --split_name "train" \
     --text_column "context" \
     --milvus_db_path "slug_search/data/milvus_hotpotqa.db" \
-    --model "intfloat/e5-mistral-7b-instruct" \
+    --model "BAAI/bge-large-en-v1.5" \
     --drop_old_db \
     --max_docs 1 \
-    --gpu-memory-utilization 0.02 \
+    --gpu-memory-utilization 0.3 \
     # --metadata_columns id title \
     
     # Add other VLLM or script-specific arguments here if needed

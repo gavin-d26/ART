@@ -344,7 +344,7 @@ if __name__ == "__main__":
 
     # final_embedding_dim is guaranteed to be set here if the script hasn't exited.
     # It incorporates args.embedding_dim logic already.
-    milvus_init_kwargs["embedding_dim"] = final_embedding_dim
+    # milvus_init_kwargs["embedding_dim"] = final_embedding_dim
 
     document_store = MilvusDocumentStore(**milvus_init_kwargs)
     print("MilvusDocumentStore initialized.")
