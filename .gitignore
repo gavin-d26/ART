@@ -11,3 +11,10 @@ wandb/
 docs/node_modules/
 dist/
 data/
+!slug_search/*
+*.db
+*.db.lock
+*.ipynb
+.cursor
+.vscode/
+

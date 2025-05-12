@@ -26,6 +26,12 @@ dependencies = [
     "panza",
 ]
 
+[project.optional-dependencies]
+slug = [
+    "pymilvus",
+    "milvus-haystack",
+]
+
 [project.scripts]
 art = "art.cli:app"
 
