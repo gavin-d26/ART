@@ -1,17 +1,15 @@
 #!/bin/bash
-
+CUDA_VISIBLE_DEVICES="5"
 # Script to launch the VLLM server for the generator model
 
 # Default values, can be overridden by environment variables or command-line arguments
-DEFAULT_MODEL="mistralai/Mistral-7B-Instruct-v0.1"
-DEFAULT_PORT="8000"
-DEFAULT_API_KEY="EMPTY" # As used in benchmarking scripts
+DEFAULT_MODEL="unsloth/Qwen3-4B"
+DEFAULT_PORT="40001"
 DEFAULT_TASK="generate" # For text generation models
-
+DEFAULT_API_KEY="EMPTY"
 # Use environment variables if set, otherwise use defaults
 MODEL_NAME="${GENERATOR_MODEL_NAME:-$DEFAULT_MODEL}"
 PORT_NUM="${GENERATOR_PORT:-$DEFAULT_PORT}"
-API_KEY="${GENERATOR_VLLM_API_KEY:-$DEFAULT_API_KEY}" # Corresponds to --api-key in vLLM
 TASK_TYPE="${GENERATOR_TASK_TYPE:-$DEFAULT_TASK}"
 
 echo "Starting VLLM OpenAI-compatible server for GENERATOR..."
@@ -27,13 +25,13 @@ echo "API Key: (Hidden for security, ensure it's set if required by your model o
 python -m vllm.entrypoints.openai.api_server \
     --model "$MODEL_NAME" \
     --port "$PORT_NUM" \
-    --api-key "$API_KEY" \
     --host "0.0.0.0" \
-    --served-model-name "generator-model" \
-    --task "$TASK_TYPE" # Explicitly set task for robustness
+    --served-model-name "$MODEL_NAME" \
+    --task "$TASK_TYPE" \
+    --gpu-memory-utilization 0.95
     # Add other VLLM arguments below as needed, for example:
     # --tensor-parallel-size 1 \
     # --max-model-len 4096 \
-    # --gpu-memory-utilization 0.90
+    
 
 echo "VLLM generator server script finished. If it launched successfully, it will be running in the background or on this terminal." 

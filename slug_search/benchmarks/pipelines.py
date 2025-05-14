@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 from haystack import AsyncPipeline
 from milvus_haystack.document_store import MilvusDocumentStore
 
@@ -9,47 +10,68 @@ from milvus_haystack.milvus_embedding_retriever import MilvusEmbeddingRetriever
 from haystack.components.builders import ChatPromptBuilder
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.dataclasses import ChatMessage
+from haystack.utils import Secret
+
+import dotenv
+
+dotenv.load_dotenv()
 
 
-def build_embedded_rag_pipeline(  # Renamed function for clarity
-    milvus_path: str,
-    # milvus_embedding_dim: int, # Removed this parameter
-    # Query Embedder (VLLM) parameters
-    query_embedding_model_name: str,  # e.g., "BAAI/bge-large-en-v1.5" as served by VLLM
-    query_embedder_api_base: str,  # URL for VLLM embedding server
-    query_embedder_api_key: str,
-    # Generator (VLLM) parameters
-    generator_model_name: str,  # e.g., "gpt-3.5-turbo" or your VLLM generator model
-    generator_api_base: str,  # URL for VLLM generator server
-    generator_api_key: str,
-    top_k_retriever: int = 3,
-) -> AsyncPipeline:
-    """
-    Builds a RAG pipeline using OpenAITextEmbedder for queries and OpenAIChatGenerator for generation.
-    Query Text -> OpenAITextEmbedder -> MilvusEmbeddingRetriever -> PromptBuilder -> OpenAIChatGenerator
-    """
+class Pipe(ABC):
+    @abstractmethod
+    def __init__(self, *args, **kwargs):
+        """
+        Initializes the pipeline. Subclasses should set up their
+        specific Haystack AsyncPipeline and store it, typically in self.pipeline.
+        """
+        self.pipeline: AsyncPipeline | None = None
+        pass
 
-    document_store = MilvusDocumentStore(
-        connection_args={"uri": milvus_path},
-        # embedding_dim=milvus_embedding_dim, # Removed this argument
-    )
+    @abstractmethod
+    async def run_pipeline(self, query: str) -> dict:
+        """
+        Runs the asynchronous pipeline with the given query.
+        Subclasses must implement this method to execute their specific pipeline.
 
-    # Query Text Embedder (points to a VLLM server)
-    query_text_embedder = OpenAITextEmbedder(
-        api_base_url=query_embedder_api_base,
-        api_key=query_embedder_api_key,
-        model=query_embedding_model_name,
-        # You might need to specify other parameters like dimensions if the API requires them,
-        # or prefix/suffix depending on the model used.
-        # For BAAI/bge models, sometimes a prefix like "query: " is used.
-        # Check VLLM's OpenAI API compatibility details for embeddings.
-    )
+        Args:
+            query: The input query string for the pipeline.
 
-    embedding_retriever = MilvusEmbeddingRetriever(
-        document_store=document_store, top_k=top_k_retriever
-    )
+        Returns:
+            A dictionary containing the output of the pipeline.
+        """
+        pass
 
-    template = """
+
+class EmbeddedRAGPipeline(Pipe):
+    def __init__(
+        self,
+        milvus_path: str,
+        query_embedding_model_name: str,
+        query_embedder_api_base: str,
+        query_embedder_api_key_env_var: str,
+        generator_model_name: str,
+        generator_api_base: str,
+        generator_api_key_env_var: str,
+        top_k_retriever: int = 3,
+        timeout: float = 60.0 * 10,
+    ):
+        super().__init__()
+        document_store = MilvusDocumentStore(
+            connection_args={"uri": milvus_path},
+        )
+
+        query_text_embedder = OpenAITextEmbedder(
+            api_base_url=query_embedder_api_base,
+            api_key=Secret.from_env_var(query_embedder_api_key_env_var),
+            model=query_embedding_model_name,
+            timeout=timeout,
+        )
+
+        embedding_retriever = MilvusEmbeddingRetriever(
+            document_store=document_store, top_k=top_k_retriever
+        )
+
+        template = """
     Given the following documents, please answer the question.
     Documents:
     {% for doc in documents %}
@@ -58,67 +80,85 @@ def build_embedded_rag_pipeline(  # Renamed function for clarity
     Question: {{query}}
     Answer:
     """
-    prompt_builder = ChatPromptBuilder(template=[ChatMessage.from_user(template)])
+        prompt_builder = ChatPromptBuilder(template=[ChatMessage.from_user(template)])
 
-    # LLM Generator (points to another VLLM server)
-    llm_chat_generator = OpenAIChatGenerator(
-        model=generator_model_name,
-        api_base_url=generator_api_base,
-        api_key=generator_api_key,
-    )
+        llm_chat_generator = OpenAIChatGenerator(
+            model=generator_model_name,
+            api_base_url=generator_api_base,
+            api_key=Secret.from_env_var(generator_api_key_env_var),
+            timeout=timeout,
+        )
 
-    # --- Build the AsyncPipeline ---
-    rag_pipeline = AsyncPipeline()
-    # Naming components clearly
-    rag_pipeline.add_component("query_text_embedder", query_text_embedder)
-    rag_pipeline.add_component("embedding_retriever", embedding_retriever)
-    rag_pipeline.add_component("prompt_builder", prompt_builder)
-    rag_pipeline.add_component("llm_chat_generator", llm_chat_generator)
+        rag_pipeline = AsyncPipeline()
+        rag_pipeline.add_component("query_text_embedder", query_text_embedder)
+        rag_pipeline.add_component("embedding_retriever", embedding_retriever)
+        rag_pipeline.add_component("prompt_builder", prompt_builder)
+        rag_pipeline.add_component("llm_chat_generator", llm_chat_generator)
 
-    # --- Connect components ---
-    # 1. Query text (from pipeline input) -> query_text_embedder (expects "text")
-    rag_pipeline.connect(
-        "query_text_embedder.embedding", "embedding_retriever.query_embedding"
-    )
+        rag_pipeline.connect(
+            "query_text_embedder.embedding", "embedding_retriever.query_embedding"
+        )
+        rag_pipeline.connect(
+            "embedding_retriever.documents", "prompt_builder.documents"
+        )
+        rag_pipeline.connect("prompt_builder.prompt", "llm_chat_generator.messages")
 
-    # 2. Retrieved documents -> prompt_builder (expects "documents")
-    rag_pipeline.connect("embedding_retriever.documents", "prompt_builder.documents")
-    # The original query text (from pipeline input) also goes to prompt_builder (expects "query")
-    # This is handled by how rag_pipeline.run() is called in benchmarking.py:
-    # data={"query_text_embedder": {"text": query_text}, "prompt_builder": {"query": query_text}}
+        self.pipeline = rag_pipeline
 
-    # 3. Formatted prompt -> llm_generator (expects "prompt")
-    rag_pipeline.connect("prompt_builder.prompt", "llm_chat_generator.messages")
+    async def run_pipeline(self, query: str) -> dict:
+        if not self.pipeline:
+            raise RuntimeError("Pipeline has not been initialized.")
+        pipeline_input_data = {
+            "query_text_embedder": {"text": query},
+            "prompt_builder": {"query": query},
+        }
+        output = await self.pipeline.run_async(data=pipeline_input_data)
+        output_dict = {
+            "generation": output["llm_chat_generator"]["replies"][0].text,
+            "generation_tokens": output["llm_chat_generator"]["replies"][0].meta[
+                "usage"
+            ]["completion_tokens"],
+        }
+        return output_dict
 
-    return rag_pipeline
 
+class NaiveGenerationPipeline(Pipe):
+    def __init__(
+        self,
+        generator_model_name: str,
+        generator_api_base: str,
+        generator_api_key_env_var: str,
+        timeout: float = 60.0 * 10,
+    ):
+        super().__init__()
+        template = [ChatMessage.from_user("{{query}}")]
+        prompt_builder = ChatPromptBuilder(template=template)
 
-def build_naive_generation_pipeline(
-    generator_model_name: str,
-    generator_api_base: str,
-    generator_api_key: str,
-) -> AsyncPipeline:
-    """
-    Builds a Naive Generation pipeline that sends the query directly to a generator.
-    Query -> PromptBuilder -> OpenAIChatGenerator
-    """
-    template = [ChatMessage.from_user("{{query}}")]  # Simple template to pass the query
-    prompt_builder = ChatPromptBuilder(template=template)
+        llm_chat_generator = OpenAIChatGenerator(
+            model=generator_model_name,
+            api_base_url=generator_api_base,
+            api_key=Secret.from_env_var(generator_api_key_env_var),
+            timeout=timeout,
+        )
 
-    llm_chat_generator = OpenAIChatGenerator(
-        model=generator_model_name,
-        api_base_url=generator_api_base,
-        api_key=generator_api_key,
-    )
+        naive_pipeline = AsyncPipeline()
+        naive_pipeline.add_component("prompt_builder", prompt_builder)
+        naive_pipeline.add_component("llm_chat_generator", llm_chat_generator)
+        naive_pipeline.connect("prompt_builder.prompt", "llm_chat_generator.messages")
 
-    naive_pipeline = AsyncPipeline()
-    naive_pipeline.add_component("prompt_builder", prompt_builder)
-    naive_pipeline.add_component("llm_chat_generator", llm_chat_generator)
+        self.pipeline = naive_pipeline
 
-    # Connect components:
-    # The original query text (from pipeline input) goes to prompt_builder (expects "query")
-    # This will be handled by how naive_pipeline.run() is called, e.g.:
-    # data={"prompt_builder": {"query": query_text}}
-    naive_pipeline.connect("prompt_builder.prompt", "llm_chat_generator.messages")
-
-    return naive_pipeline
+    async def run_pipeline(self, query: str) -> dict:
+        if not self.pipeline:
+            raise RuntimeError("Pipeline has not been initialized.")
+        pipeline_input_data = {
+            "prompt_builder": {"query": query},
+        }
+        output = await self.pipeline.run_async(data=pipeline_input_data)
+        output_dict = {
+            "generation": output["llm_chat_generator"]["replies"][0].text,
+            "generation_tokens": output["llm_chat_generator"]["replies"][0].meta[
+                "usage"
+            ]["completion_tokens"],
+        }
+        return output_dict

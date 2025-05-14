@@ -64,7 +64,7 @@ def parse_args():
     parser.set_defaults(
         model="BAAI/bge-large-en-v1.5",  # Default VLLM model for embeddings
         task="embed",  # Crucial for telling VLLM to do embedding
-        enforce_eager=True,  # As per the example provided
+        # enforce_eager=True,  # As per the example provided
         # Note: Other VLLM arguments (e.g., tensor_parallel_size, dtype) can be set via CLI
     )
 

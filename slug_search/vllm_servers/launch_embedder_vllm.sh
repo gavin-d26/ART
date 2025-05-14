@@ -1,18 +1,18 @@
 #!/bin/bash
-
+CUDA_VISIBLE_DEVICES="4"
 # Script to launch the VLLM server for the embedding model
 
 # Default values, can be overridden by environment variables or command-line arguments
 DEFAULT_MODEL="BAAI/bge-large-en-v1.5"
-DEFAULT_PORT="8001"
-DEFAULT_API_KEY="EMPTY" # As used in benchmarking scripts
+DEFAULT_PORT="40002"
 DEFAULT_TASK="embed"    # Crucial for embedding models
+DEFAULT_API_KEY="EMPTY"
 
 # Use environment variables if set, otherwise use defaults
 MODEL_NAME="${EMBEDDER_MODEL_NAME:-$DEFAULT_MODEL}"
 PORT_NUM="${EMBEDDER_PORT:-$DEFAULT_PORT}"
-API_KEY="${EMBEDDER_VLLM_API_KEY:-$DEFAULT_API_KEY}"
 TASK_TYPE="${EMBEDDER_TASK_TYPE:-$DEFAULT_TASK}"
+API_KEY="${EMBEDDER_API_KEY:-$DEFAULT_API_KEY}"
 
 
 echo "Starting VLLM OpenAI-compatible server for EMBEDDER..."
@@ -34,14 +34,13 @@ echo "API Key: (Hidden for security, ensure it's set if required by your model o
 python -m vllm.entrypoints.openai.api_server \
     --model "$MODEL_NAME" \
     --port "$PORT_NUM" \
-    --api-key "$API_KEY" \
     --host "0.0.0.0" \
-    --served-model-name "embedder-model" \
+    --served-model-name "$MODEL_NAME" \
     --task "$TASK_TYPE" \
+    --gpu-memory-utilization 0.40 \
+    # --max-model-len 8192 \ # BGE models can have larger sequence lengths
     # Add other VLLM arguments below as needed, for example:
     # --tensor-parallel-size 1 \
-    # --max-model-len 8192 \ # BGE models can have larger sequence lengths
-    # --gpu-memory-utilization 0.90 \
     # --enforce-eager # If needed, though typically not for OpenAI API server for embeddings.
 
 echo "VLLM embedder server script finished. If it launched successfully, it will be running in the background or on this terminal." 
