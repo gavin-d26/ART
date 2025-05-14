@@ -11,11 +11,11 @@ import json
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[logging.FileHandler("benchmarking.log"), logging.StreamHandler()],
+    handlers=[logging.FileHandler("benchmarking.log")],
 )
 logger = logging.getLogger(__name__)
 
-TIMEOUT = 60.0 * 10
+TIMEOUT = 60.0 * 20
 
 
 # --- Argument Parsing ---
@@ -110,6 +110,12 @@ def parse_args():
         default="benchmark_results.jsonl",
         help="Path to save the benchmarking results JSONL file.",
     )
+    parser.add_argument(
+        "--concurrency_limit",
+        type=int,
+        default=50,  # Default value if not provided
+        help="Maximum number of concurrent queries to process.",
+    )
     return parser.parse_args()
 
 
@@ -117,6 +123,10 @@ def parse_args():
 async def main():
     args = parse_args()
     logger.info("Starting benchmarking script with arguments: %s", args)
+
+    # 0. Define concurrency limit
+    CONCURRENCY_LIMIT = args.concurrency_limit
+    logger.info(f"Using concurrency limit: {CONCURRENCY_LIMIT}")
 
     # 1. Load API Keys
     generator_api_key_env_name = args.generator_openai_api_key_env
@@ -201,43 +211,47 @@ async def main():
     results = []
     logger.info(f"Starting RAG pipeline runs for {len(df)} queries...")
 
-    async def process_query(query_text, actual_answer, pipeline_instance, p_id):
-        logger.info(f'Starting processing for query ID {p_id}: "{query_text[:100]}..."')
-        try:
-            # pipeline_input_data is now constructed inside the pipeline's run_pipeline method
-            # Use run_pipeline() for non-blocking execution, passing only the query
-            generated_answer = {}
-            pipeline_output = await pipeline_instance.run_pipeline(query=query_text)
+    semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
-            generated_answer = pipeline_output.get(
-                "generation", "Error: Could not extract answer"
-            )
-
-            # Store other information from pipeline_output (e.g., "generation_tokens") as metadata
-            pipeline_meta = {
-                k: v for k, v in pipeline_output.items() if k != "generation"
-            }
-
+    async def process_query_wrapper(query_text, actual_answer, pipeline_instance, p_id):
+        async with semaphore:  # Acquire semaphore
             logger.info(
-                f"Finished query ID {p_id}. Query: {query_text}, Actual: {actual_answer}, Generated: {generated_answer}"
+                f'Semaphore acquired for query ID {p_id}. Starting processing: "{query_text[:100]}..."'
             )
-            return {
-                "query": query_text,
-                "actual_answer": actual_answer,
-                "generated_answer": generated_answer,
-                "pipeline_output_metadata": pipeline_meta,
-            }
-        except Exception as e:
-            logger.error(
-                f'Error running pipeline for query ID {p_id} ("{query_text}"): {e}',
-                exc_info=True,
-            )
-            return {
-                "query": query_text,
-                "actual_answer": actual_answer,
-                "generated_answer": f"Error: {e}",
-                "pipeline_output_metadata": {},
-            }
+            try:
+                # pipeline_input_data is now constructed inside the pipeline's run_pipeline method
+                # Use run_pipeline() for non-blocking execution, passing only the query
+                generated_answer = {}
+                pipeline_output = await pipeline_instance.run_pipeline(query=query_text)
+
+                generated_answer = pipeline_output.get(
+                    "generation", "Error: Could not extract answer"
+                )
+
+                # Store other information from pipeline_output (e.g., "generation_tokens") as metadata
+                generated_tokens = pipeline_output.get("generation_tokens", [])
+
+                logger.info(
+                    f"Finished query ID {p_id}. Query: {query_text}, Actual: {actual_answer}, Generated: {generated_answer}, Tokens: {generated_tokens}"
+                )
+                return {
+                    "query": query_text,
+                    "actual_answer": actual_answer,
+                    "generated_answer": generated_answer,
+                    "generated_tokens": generated_tokens,
+                }
+            except Exception as e:
+                logger.error(
+                    f'Error running pipeline for query ID {p_id} ("{query_text}"): {e}',
+                    exc_info=True,
+                )
+                return {
+                    "query": query_text,
+                    "actual_answer": actual_answer,
+                    "generated_answer": f"Error: {e}",
+                    "generated_tokens": 0,
+                }
+            # Semaphore is released automatically when exiting the 'async with' block
 
     # Create tasks for all queries
     tasks = []
@@ -245,11 +259,24 @@ async def main():
         query_text = row[args.query_column]
         actual_answer = row[args.answer_column]
         # Pass the single rag_pipeline_instance to each task
+        # Also, ensure actual_answer is in a format suitable for JSON (e.g. list of strings if it's complex)
+        # The original .tolist() might be problematic if actual_answer is not a Series/array object here.
+        # Assuming actual_answer from df row is already suitable or simple type. If it's a list/array:
+        current_actual_answer = actual_answer
+        if hasattr(
+            actual_answer, "tolist"
+        ):  # Check if it's a pandas Series or numpy array
+            current_actual_answer = actual_answer.tolist()
+
         tasks.append(
-            process_query(query_text, actual_answer, rag_pipeline_instance, index + 1)
+            process_query_wrapper(  # Use the wrapper
+                query_text, current_actual_answer, rag_pipeline_instance, index + 1
+            )
         )  # index + 1 for 1-based logging
 
-    logger.info(f"Gathering results for {len(tasks)} queries concurrently...")
+    logger.info(
+        f"Gathering results for {len(tasks)} queries concurrently with a limit of {CONCURRENCY_LIMIT}..."
+    )
     results_list = await asyncio.gather(*tasks)
 
     # Filter out None results if any task failed critically before returning a dict (though current process_query always returns a dict)

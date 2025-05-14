@@ -20,7 +20,8 @@ python -m slug_search.benchmarks.benchmarking \
     --query_column "question" \
     --answer_column "answers" \
     --milvus_db_path "slug_search/data/milvus_hotpotqa.db" \
-    --max_queries 10 \
-    --results_output_path "hotpotqa_benchmark_results.jsonl"
+    --results_output_path "hotpotqa_benchmark_results.jsonl" \
+    --concurrency_limit 70 \
+    # --max_queries 100 \
 
 echo "Benchmarking script finished. Check ./benchmarking.log and ./hotpotqa_benchmark_results.jsonl (in project root)" 

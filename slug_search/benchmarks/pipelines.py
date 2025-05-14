@@ -72,13 +72,20 @@ class EmbeddedRAGPipeline(Pipe):
         )
 
         template = """
-    Given the following documents, please answer the question.
-    Documents:
+    Given the following documents given within the <documents> tags, please answer the question given within the <question> tags. Provide your final answer within 
+    <answer> 
+    Your Final Answer 
+    </answer> tags.
+    
+    <documents>
     {% for doc in documents %}
-        {{ doc.content }}
+        <document> {{ doc.content }} </document>
     {% endfor %}
-    Question: {{query}}
-    Answer:
+    </documents>
+    
+    <question> {{query}} </question>
+    
+    <answer>
     """
         prompt_builder = ChatPromptBuilder(template=[ChatMessage.from_user(template)])
 

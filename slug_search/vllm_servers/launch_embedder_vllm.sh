@@ -1,5 +1,7 @@
 #!/bin/bash
-CUDA_VISIBLE_DEVICES="4"
+export VLLM_CONFIGURE_LOGGING=1
+export VLLM_LOGGING_CONFIG_PATH="./slug_search/vllm_servers/embedder_logging_config.json" # Assuming script is run from project root
+export CUDA_VISIBLE_DEVICES="4"
 # Script to launch the VLLM server for the embedding model
 
 # Default values, can be overridden by environment variables or command-line arguments
@@ -7,18 +9,21 @@ DEFAULT_MODEL="BAAI/bge-large-en-v1.5"
 DEFAULT_PORT="40002"
 DEFAULT_TASK="embed"    # Crucial for embedding models
 DEFAULT_API_KEY="EMPTY"
+DEFAULT_LOG_FILE="embedder_vllm_server.log" # Default log file
 
 # Use environment variables if set, otherwise use defaults
 MODEL_NAME="${EMBEDDER_MODEL_NAME:-$DEFAULT_MODEL}"
 PORT_NUM="${EMBEDDER_PORT:-$DEFAULT_PORT}"
 TASK_TYPE="${EMBEDDER_TASK_TYPE:-$DEFAULT_TASK}"
 API_KEY="${EMBEDDER_API_KEY:-$DEFAULT_API_KEY}"
+LOG_FILE="${EMBEDDER_LOG_FILE:-$DEFAULT_LOG_FILE}"
 
 
 echo "Starting VLLM OpenAI-compatible server for EMBEDDER..."
 echo "Model: $MODEL_NAME"
 echo "Port: $PORT_NUM"
 echo "Task: $TASK_TYPE"
+echo "Logging to: $LOG_FILE (via VLLM_LOGGING_CONFIG_PATH)"
 echo "API Key: (Hidden for security, ensure it's set if required by your model or setup)"
 
 # Adjust --max-model-len, --tensor-parallel-size, --gpu-memory-utilization as needed
@@ -43,4 +48,4 @@ python -m vllm.entrypoints.openai.api_server \
     # --tensor-parallel-size 1 \
     # --enforce-eager # If needed, though typically not for OpenAI API server for embeddings.
 
-echo "VLLM embedder server script finished. If it launched successfully, it will be running in the background or on this terminal." 
+echo "VLLM embedder server script finished. If it launched successfully, it will be running in the background or on this terminal (logs in $LOG_FILE via VLLM logging config)." 
