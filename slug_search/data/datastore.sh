@@ -9,6 +9,7 @@ python "$SCRIPT_DIR/datastore.py" \
     --text_column "context" \
     --milvus_db_path "slug_search/data/milvus_hotpotqa.db" \
     --model "BAAI/bge-large-en-v1.5" \
+    --preprocess_function "preprocess_and_chunk_text" \
     --drop_old_db \
     --gpu-memory-utilization 0.4 \
     # --max_docs 1 \
@@ -22,6 +23,7 @@ python "$SCRIPT_DIR/datastore.py" \
     --text_column "context" \
     --milvus_db_path "slug_search/data/milvus_hotpotqa.db" \
     --model "BAAI/bge-large-en-v1.5" \
+    --preprocess_function "preprocess_and_chunk_text" \
     --gpu-memory-utilization 0.4 \
 
 echo "Datastore script execution finished for validation split."

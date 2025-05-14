@@ -55,6 +55,12 @@ def parse_args():
         default=[],
         help="List of column names from the dataset to include as metadata.",
     )
+    parser.add_argument(
+        "--preprocess_function",
+        type=str,
+        default="preprocess_and_chunk_text",
+        help="Name of the preprocessing function to use for text.",
+    )
 
     # Add VLLM engine arguments to the parser
     parser = EngineArgs.add_cli_args(parser)
@@ -154,7 +160,7 @@ if __name__ == "__main__":
     print(f"  VLLM Model: {args.model}")
     print(f"  Max Documents: {args.max_docs if args.max_docs else 'All'}")
     print(f"  VLLM Task: {args.task}")
-    print(f"  VLLM Enforce Eager: {args.enforce_eager}")
+    print(f"  Preprocessing Function: {args.preprocess_function}")
 
     # 1. Load data
     dataframe = load_hf_dataset_to_dataframe(
@@ -177,12 +183,21 @@ if __name__ == "__main__":
                 f"Warning: Specified metadata column '{mc}' not found in DataFrame. It will be skipped."
             )
 
+    # Resolve the preprocessing function
+    preprocess_function_to_use = globals().get(args.preprocess_function)
+    if not callable(preprocess_function_to_use):
+        print(
+            f"Warning: Preprocessing function '{args.preprocess_function}' not found or not callable. "
+            f"Defaulting to 'preprocess_and_chunk_text'."
+        )
+        preprocess_function_to_use = preprocess_and_chunk_text
+
     # 2. Create Haystack Documents (without embeddings yet)
     documents_to_embed = create_haystack_documents(
         df=dataframe,
         text_column=args.text_column,
         metadata_columns=args.metadata_columns,
-        preprocess_fn=preprocess_and_chunk_text,
+        preprocess_fn=preprocess_function_to_use,
     )
 
     if not documents_to_embed:
