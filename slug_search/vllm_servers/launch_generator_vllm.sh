@@ -37,6 +37,8 @@ python -m vllm.entrypoints.openai.api_server \
     --task "$TASK_TYPE" \
     --gpu-memory-utilization 0.95 \
     --max-model-len 8192 \
+    --enable-auto-tool-choice \
+    --tool-call-parser hermes \
     # Add other VLLM arguments below as needed, for example:
     # --tensor-parallel-size 1 \
 

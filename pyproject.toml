@@ -34,6 +34,7 @@ slug = [
     "haystack-ai>=2.13.1",
     "haystack-experimental>=0.9.0",
     "python-json-logger",
+    "langchain-core",
 ]
 
 [project.scripts]
