@@ -6,7 +6,7 @@ import logging
 from openai import AsyncOpenAI
 import os
 import torch
-from typing import Any, AsyncIterator, Callable, Coroutine, TYPE_CHECKING
+from typing import Any, AsyncIterator, Callable, Coroutine, TYPE_CHECKING, Optional
 from vllm.engine.async_llm_engine import AsyncLLMEngine
 from vllm.engine.protocol import EngineClient
 from vllm.entrypoints.openai.cli_args import make_arg_parser, validate_parsed_serve_args
@@ -207,7 +207,7 @@ def patch_allocator() -> None:
                 data.cpu_backup_tensor = cpu_backup_tensor
             unmap_and_release(handle)
 
-    def wake_up() -> None:
+    def wake_up(tags: Optional[list[str]] = None) -> None:
         """
         Wake up the allocator from sleep mode.
         All data that is previously offloaded will be loaded back to GPU
@@ -216,18 +216,19 @@ def patch_allocator() -> None:
         for ptr, data in allocator.pointer_to_data.items():
             if data.tag != "kv_cache":
                 continue
-            create_and_map(data.handle)
-            if data.cpu_backup_tensor is not None:
-                cpu_backup_tensor = data.cpu_backup_tensor
-                if cpu_backup_tensor is not None:
-                    size_in_bytes = (
-                        cpu_backup_tensor.numel() * cpu_backup_tensor.element_size()
-                    )
-                    cpu_ptr = cpu_backup_tensor.data_ptr()
-                    libcudart.cudaMemcpy(
-                        ctypes.c_void_p(ptr), ctypes.c_void_p(cpu_ptr), size_in_bytes
-                    )
-                    data.cpu_backup_tensor = None
+            if tags is None or data.tag in tags:
+                create_and_map(data.handle)
+                if data.cpu_backup_tensor is not None:
+                    cpu_backup_tensor = data.cpu_backup_tensor
+                    if cpu_backup_tensor is not None:
+                        size_in_bytes = (
+                            cpu_backup_tensor.numel() * cpu_backup_tensor.element_size()
+                        )
+                        cpu_ptr = cpu_backup_tensor.data_ptr()
+                        libcudart.cudaMemcpy(
+                            ctypes.c_void_p(ptr), ctypes.c_void_p(cpu_ptr), size_in_bytes
+                        )
+                        data.cpu_backup_tensor = None
 
     allocator.sleep = sleep
     allocator.wake_up = wake_up
@@ -263,14 +264,12 @@ def patch_get_lora_tokenizer_async() -> None:
 
     Specifically, Unsloth patches get_lora_tokenizer_async with a non-async function, which causes issues.
     """
-    import vllm.transformers_utils.tokenizer_group.tokenizer_group
+    import vllm.transformers_utils.tokenizer_group as tg
 
-    async def _return_nothing(*_, **__) -> None:
-        return None
+    async def get_self_lora_tokenizer_async(self, *args, **kwargs):
+        return self.tokenizer
 
-    vllm.transformers_utils.tokenizer_group.tokenizer_group.get_lora_tokenizer_async = (
-        _return_nothing  # type: ignore
-    )
+    tg.TokenizerGroup.get_lora_tokenizer_async = get_self_lora_tokenizer_async  # type: ignore
 
 
 def patch_listen_for_disconnect() -> None:

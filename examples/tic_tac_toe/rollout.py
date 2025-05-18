@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 from openpipe.client import OpenPipe
 
-from utils import (
+from game_utils import (
     generate_game,
     get_opponent_move,
     apply_agent_move,
@@ -43,6 +43,7 @@ async def rollout(model: art.Model, scenario: TicTacToeScenario) -> art.Trajecto
     )
 
     move_number = 0
+    invalid_move = False
 
     if game["agent_symbol"] == "o":
         starting_opponent_move = get_opponent_move(game)
@@ -65,7 +66,6 @@ async def rollout(model: art.Model, scenario: TicTacToeScenario) -> art.Trajecto
                 messages=messages,
                 max_completion_tokens=128,
             )
-            last_completion = chat_completion
         except openai.LengthFinishReasonError as e:
             raise e
         except Exception as e:
@@ -83,7 +83,8 @@ async def rollout(model: art.Model, scenario: TicTacToeScenario) -> art.Trajecto
         try:
             apply_agent_move(game, content)
         except ValueError:
-            trajectory.reward = -1 + (math.log(move_number + 1) / math.log(100))
+            invalid_move = True
+            trajectory.reward = -100 + (math.log(move_number + 1) / math.log(100))
             break
 
         move_number += 1
@@ -106,6 +107,7 @@ async def rollout(model: art.Model, scenario: TicTacToeScenario) -> art.Trajecto
         trajectory.metrics["win"] = 0.5
 
     trajectory.metrics["num_moves"] = move_number
+    trajectory.metrics["invalid_move"] = 1 if invalid_move else 0
 
     if op_client.api_key:
         try:
@@ -124,6 +126,7 @@ async def rollout(model: art.Model, scenario: TicTacToeScenario) -> art.Trajecto
                         "num_moves": str(move_number),
                         "win": str(reported_win),
                         "reward": str(trajectory.reward),
+                        "invalid_move": str(invalid_move),
                     },
                 },
                 resp_payload=chat_completion,
