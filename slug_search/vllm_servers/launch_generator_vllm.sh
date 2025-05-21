@@ -39,6 +39,8 @@ python -m vllm.entrypoints.openai.api_server \
     --max-model-len 8192 \
     --enable-auto-tool-choice \
     --tool-call-parser hermes \
+    # --enable-reasoning \
+    # --reasoning-parser deepseek_r1 \
     # Add other VLLM arguments below as needed, for example:
     # --tensor-parallel-size 1 \
 

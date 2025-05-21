@@ -169,3 +169,45 @@ class NaiveGenerationPipeline(Pipe):
             ]["completion_tokens"],
         }
         return output_dict
+
+
+class EmbedderRetrieverPipeline(Pipe):
+    def __init__(
+        self,
+        milvus_path: str,
+        embedding_model_name: str,
+        embedder_api_base: str,
+        embedder_api_key_env_var: str,
+        top_k_retriever: int = 3,
+        timeout: float = 60.0 * 10,
+    ):
+        super().__init__()
+        document_store = MilvusDocumentStore(
+            connection_args={"uri": milvus_path},
+        )
+        query_text_embedder = OpenAITextEmbedder(
+            api_base_url=embedder_api_base,
+            api_key=Secret.from_env_var(embedder_api_key_env_var),
+            model=embedding_model_name,
+            timeout=timeout,
+        )
+        embedding_retriever = MilvusEmbeddingRetriever(
+            document_store=document_store, top_k=top_k_retriever
+        )
+        pipeline = AsyncPipeline()
+        pipeline.add_component("query_text_embedder", query_text_embedder)
+        pipeline.add_component("embedding_retriever", embedding_retriever)
+        pipeline.connect(
+            "query_text_embedder.embedding", "embedding_retriever.query_embedding"
+        )
+        self.pipeline = pipeline
+
+    async def run_pipeline(self, query: str) -> dict:
+        if not self.pipeline:
+            raise RuntimeError("Pipeline has not been initialized.")
+        pipeline_input_data = {
+            "query_text_embedder": {"text": query},
+        }
+        output = await self.pipeline.run_async(data=pipeline_input_data)
+        # Return the retriever's output (documents)
+        return {"documents": output["embedding_retriever"]["documents"]}
