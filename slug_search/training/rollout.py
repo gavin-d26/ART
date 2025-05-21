@@ -7,7 +7,9 @@ import asyncio
 from tenacity import retry, stop_after_attempt, wait_exponential
 from openai import OpenAI
 from slug_search.training.search_tools import search_documents, return_final_answer
+from slug_search.training import verifiers
 from langchain_core.utils.function_calling import convert_to_openai_tool
+import importlib
 
 
 @dataclass
@@ -28,10 +30,6 @@ openai_search_documents = convert_to_openai_tool(search_documents)
 openai_return_final_answer = convert_to_openai_tool(return_final_answer)
 
 tools = [openai_search_documents, openai_return_final_answer]
-
-
-def check_answer_correctness(answer: str, correct_answer: str) -> bool:
-    return correct_answer in answer
 
 
 async def get_tool_result(tool_name: str, tool_args: dict) -> str:
@@ -83,6 +81,7 @@ async def rollout(
 
     client = model.openai_client()
     model_name = model.config.base_model
+    verifier = getattr(verifiers, model.config.verifier)
 
     while True:
         if rubric.num_tool_calls > 10:
@@ -94,9 +93,7 @@ async def rollout(
             "add_generation_prompt": True,
             "continue_final_message": False,
         }
-        if getattr(model, "config", None) and getattr(
-            model.config, "custom_chat_template", None
-        ):
+        if getattr(model, "config", None) and getattr(model.config, "custom_chat_template", None): # fmt: skip
             extra_body["chat_template"] = model.config.custom_chat_template
         llm_response = await client.chat.completions.create(
             model=model_name,
@@ -149,9 +146,7 @@ async def rollout(
                 if answer is not None:
                     final_answer = answer
                     rubric.has_answer = True
-                    rubric.answer_correct = check_answer_correctness(
-                        final_answer, scenario.answer
-                    )
+                    rubric.answer_correct = verifier(final_answer, scenario.answer)
                     rubric.num_successful_tool_calls += 1
                 else:
                     rubric.has_answer = False

@@ -42,6 +42,8 @@ project_policy_config = ProjectPolicyConfig(
     use_tools=True,
     training_config=training_config,
     prompt_template="default_query_prompt",
+    verifier="check_answer_correctness_multi_gt",
+    # Training dataset
     training_dataset_path="lucadiliello/hotpotqa",
     training_dataset_split="train",
     training_prompt_column="question",
@@ -152,10 +154,19 @@ if __name__ == "__main__":
         default="default_query_prompt",
         help=f"Prompt template key to use from prompts.json (default: 'default_query_prompt').",
     )
+    parser.add_argument(
+        "--verifier",
+        type=str,
+        default="check_answer_correctness_multi_gt",
+        help="Verifier to use for training.",
+    )
     args = parser.parse_args()
 
     if args.prompt_template:
         project_policy_config.prompt_template = args.prompt_template
+
+    if args.verifier:
+        project_policy_config.verifier = args.verifier
 
     if args.debug:
         model_name = "slug-search-agent-debug"

@@ -1,5 +1,6 @@
 import math
 import random
+import json
 from typing import List, Generator, Tuple
 from tqdm.auto import tqdm
 from datasets import load_dataset, Dataset
@@ -82,7 +83,11 @@ def load_and_iterate_hf_dataset(
             else:
                 formatted_prompt = str(prompt_text)
             processed_dataset.append(
-                SearchQuery(id=i, query=formatted_prompt, answer=str(answer_text))
+                SearchQuery(
+                    id=i,
+                    query=formatted_prompt,
+                    answer=json.dumps(answer_text), # return the answer as a json string since it could be a list of strings. # fmt: skip
+                )
             )
         except Exception as e:
             print(f"Warning: Error processing record {i}: {e}. Skipping record.")

@@ -20,6 +20,7 @@ class ProjectPolicyConfig(BaseModel):
     training_config: TrainingConfig | None = None
     custom_chat_template: str | None = None
     prompt_template: str | None = None  # The prompt template string to use for training
+    verifier: str | None = None  # The verifier to use for training. A function name from verifiers.py (see slug_search/training/verifiers.py)
     # Training dataset specific parameters
     training_dataset_path: str = "default/dataset-path"  # Placeholder, needs to be configured
     training_dataset_split: str = "train"  # Placeholder
@@ -39,4 +40,4 @@ class ProjectPolicyConfig(BaseModel):
 class SearchQuery(BaseModel):
     id: int
     query: str
-    answer: str
+    answer: str  # The answer is a json string since it could be a list of strings.
