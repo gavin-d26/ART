@@ -76,6 +76,21 @@ class LocalBackend(Backend):
         self._tokenizers: dict[str, "PreTrainedTokenizerBase"] = {}
         self._wandb_runs: dict[str, Run] = {}
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *excinfo):
+        self.close()
+
+    def close(self):
+        """
+        If running vLLM in a separate process, this will kill that process and close the communication threads.
+        """
+        for _, service in self._services.items():
+            close_method = getattr(service, "close", None)
+            if callable(close_method):
+                close_method()
+
     async def register(
         self,
         model: Model,
