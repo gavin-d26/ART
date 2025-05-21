@@ -62,6 +62,10 @@ PROMPTS_JSON_PATH = Path(__file__).parent / "prompts.json"
 with open(PROMPTS_JSON_PATH, "r") as f:
     prompt_templates = json.load(f)
 
+CHAT_TEMPLATE_PATH = Path(__file__).parent / "chat_templates.json"
+with open(CHAT_TEMPLATE_PATH, "r") as f:
+    chat_templates = json.load(f)
+
 
 def get_prompt_template(key: str) -> str:
     if key not in prompt_templates:
@@ -160,6 +164,12 @@ if __name__ == "__main__":
         default="check_answer_correctness_multi_gt",
         help="Verifier to use for training.",
     )
+    parser.add_argument(
+        "--chat_template",
+        type=str,
+        default=None,
+        help="Chat template to use for training.",
+    )
     args = parser.parse_args()
 
     if args.prompt_template:
@@ -167,6 +177,13 @@ if __name__ == "__main__":
 
     if args.verifier:
         project_policy_config.verifier = args.verifier
+
+    if args.chat_template:
+        if args.chat_template not in chat_templates:
+            raise ValueError(
+                f"Chat template key '{args.chat_template}' not found in chat_templates.json. Available keys: {list(chat_templates.keys())}"
+            )
+        project_policy_config.custom_chat_template = chat_templates[args.chat_template]
 
     if args.debug:
         model_name = "slug-search-agent-debug"

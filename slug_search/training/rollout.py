@@ -84,9 +84,9 @@ async def rollout(
     verifier = getattr(verifiers, model.config.verifier)
 
     while True:
-        if rubric.num_tool_calls > 10:
+        if rubric.num_tool_calls > model.config.max_tool_calls:
             break
-        if rubric.completion_tokens > 1000:
+        if rubric.completion_tokens > model.config.max_tokens:
             break
 
         extra_body = {
