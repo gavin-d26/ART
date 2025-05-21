@@ -7,6 +7,8 @@ from typing import List
 import argparse  # Added for command line argument parsing
 import json
 from pathlib import Path
+import polars as pl
+from datetime import datetime  # Added for timestamping
 
 from .rollout import rollout
 from .data_types import ProjectPolicyConfig, TrainingConfig, SearchQuery
@@ -75,6 +77,101 @@ def get_prompt_template(key: str) -> str:
     return prompt_templates[key]
 
 
+# run a validation step between training epochs/steps.
+async def run_validation(model: art.TrainableModel, global_step: int):
+    assert hasattr(model, "config")
+    config = model.config
+    train_cfg = config.training_config
+    prompt_template_key = config.prompt_template
+    prompt_template = None
+    if prompt_template_key:
+        prompt_template = get_prompt_template(prompt_template_key)
+
+    print(f"Running validation for model: {model.name}")
+
+    # Use dataloader for validation data
+    val_iterator = load_and_iterate_hf_dataset(
+        dataset_path=config.val_dataset_path,
+        dataset_split=config.val_dataset_split,
+        prompt_column=config.val_prompt_column,
+        answer_column=config.val_answer_column,
+        prompt_template=prompt_template,
+        batch_size=config.max_val_samples,  # Process all val samples in one batch
+        num_epochs=1,  # Single pass
+        max_samples=config.max_val_samples,
+    )
+
+    all_val_scenarios = []
+    for batch, _, _, _ in val_iterator:
+        all_val_scenarios.extend(batch)
+
+    if not all_val_scenarios:
+        print("No validation scenarios found. Skipping validation.")
+        return
+
+    val_trajectories = await art.gather_trajectories(
+        (rollout(model, scenario) for scenario in all_val_scenarios),
+        pbar_desc=f"Validation for {model.name}",
+        max_exceptions=config.max_val_samples,  # Allow exceptions for all scenarios
+    )
+
+    valid_trajectories = [t for t in val_trajectories if isinstance(t, art.Trajectory)]
+
+    if not valid_trajectories:
+        print(
+            "No valid trajectories generated during validation. Skipping metrics calculation."
+        )
+        return
+
+    if getattr(model, "_backend", None) is not None and hasattr(model, "log"):
+        await model.log(valid_trajectories)
+
+    metrics_list = []
+    for t in valid_trajectories:
+        metric_data = {}
+        if getattr(t, "metrics", None):
+            metric_data.update(t.metrics)
+        if getattr(t, "reward", None) is not None:
+            metric_data["reward"] = t.reward
+        if metric_data:
+            metrics_list.append(metric_data)
+
+    if not metrics_list:
+        print(
+            "No metrics or rewards found in valid trajectories. Skipping metrics calculation."
+        )
+        return
+
+    metrics_df = pl.DataFrame(metrics_list)
+
+    avg_metrics = metrics_df.select(
+        [
+            pl.mean(c).alias(c)
+            for c in metrics_df.columns
+            if metrics_df[c].dtype != pl.Null
+        ]
+    ).with_columns(pl.lit(len(valid_trajectories)).alias("n_trajectories"))
+
+    # Log metrics to file
+    project_name = model.project
+    model_name = model.name
+    log_dir = Path("validation_logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file_path = log_dir / f"{project_name}-{model_name}.log"
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_entry = f"Timestamp: {timestamp}, Global Step: {global_step}\nMetrics:\n{avg_metrics.to_pandas().to_string()}\n---\n"
+
+    with open(log_file_path, "a") as f:
+        f.write(log_entry)
+
+    print(f"Validation metrics logged to {log_file_path}")
+
+    return avg_metrics
+
+
+# The model/LoRA is saved at .art/project_name/models/model_name
+# Function to run training.
 async def run_training(
     model_name: str,
     project_name: str,
@@ -116,6 +213,12 @@ async def run_training(
         print(
             f"Epoch: {epoch}, Global Step: {global_step}, Epoch Step: {epoch_step}, Batch Size: {len(batch)}"
         )
+        # Run validation after each eval_steps
+        if (global_step > 0 and global_step % train_cfg.eval_steps == 0): # fmt: skip # ensure global_step > 0
+            validation_results = await run_validation(model, global_step)
+            if validation_results is not None:
+                print("Validation Metrics from run_validation return:")
+                print(validation_results)
         trajectory_groups = await art.gather_trajectory_groups(
             (
                 art.TrajectoryGroup(
@@ -135,10 +238,17 @@ async def run_training(
             )
             continue
 
-    await model.train(
-        trajectory_groups,
-        config=art.TrainConfig(learning_rate=train_cfg.learning_rate),
-    )
+        await model.train(
+            trajectory_groups,
+            config=art.TrainConfig(learning_rate=train_cfg.learning_rate),
+        )
+
+    # Run validation after training
+    if (global_step > 0 and global_step % train_cfg.eval_steps == 0): # fmt: skip # ensure global_step > 0
+        validation_results = await run_validation(model, global_step)
+        if validation_results is not None:
+            print("Validation Metrics from run_validation return:")
+            print(validation_results)
 
     print("Training finished.")
 
@@ -196,6 +306,7 @@ if __name__ == "__main__":
         debug_project_policy_config.max_training_samples = 1
         debug_project_policy_config.max_val_samples = 1
         # Also modify the nested training_config for debugging
+        debug_project_policy_config.training_config.eval_steps = 1
         debug_project_policy_config.training_config.trajectories_per_group = 1
         debug_project_policy_config.training_config.groups_per_step = 1
         debug_project_policy_config.training_config.num_epochs = 1
