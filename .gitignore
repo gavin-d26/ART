@@ -20,3 +20,5 @@ data/
 logs/
 *.log
 *.jsonl
+*.json
+plan.md

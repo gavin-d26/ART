@@ -17,7 +17,7 @@ from .search_tools import configure_search_tools
 
 load_dotenv()
 
-# Configure search tools
+# Configure search tools (will be updated with command line args later)
 configure_search_tools(
     milvus_db_path="slug_search/data/milvus_hotpotqa.db",
     embedding_model_name="BAAI/bge-large-en-v1.5",
@@ -280,6 +280,12 @@ if __name__ == "__main__":
         default=None,
         help="Chat template to use for training.",
     )
+    parser.add_argument(
+        "--top_k",
+        type=int,
+        default=3,
+        help="Number of top documents to retrieve for search (default: 3).",
+    )
     args = parser.parse_args()
 
     if args.prompt_template:
@@ -294,6 +300,15 @@ if __name__ == "__main__":
                 f"Chat template key '{args.chat_template}' not found in chat_templates.json. Available keys: {list(chat_templates.keys())}"
             )
         project_policy_config.custom_chat_template = chat_templates[args.chat_template]
+
+    # Reconfigure search tools with command line arguments
+    configure_search_tools(
+        milvus_db_path="slug_search/data/milvus_hotpotqa.db",
+        embedding_model_name="BAAI/bge-large-en-v1.5",
+        embedder_api_base="http://localhost:40002/v1",
+        embedder_api_key_env_var="EMBEDDER_API_KEY",
+        top_k=args.top_k,
+    )
 
     if args.debug:
         model_name = "slug-search-agent-debug"

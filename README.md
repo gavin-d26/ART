@@ -40,7 +40,25 @@ The project involves careful consideration of several key aspects:
 *   **Language Model Selection**: Choosing an appropriate base or instruction-tuned LLM as the foundation for our agent.
 *   **Search/Retrieval Tool**: Determining the nature of the search tool – whether to use a live search engine or a retrieval system built upon a curated document corpus.
 *   **Reinforcement Learning Strategy**: Implementing and experimenting with suitable RL algorithms (such as GRPO, Reinforce++, Dr. GRPO, DAPO) to optimize agent behavior.
-*   **Evaluation Metrics**: Employing a comprehensive suite of metrics, including exact match, F1 score, coverage, and potentially human or LM-based judgment, while also tracking retrieval efficiency (e.g., number of calls).
+*   **Comprehensive Evaluation System**: A flexible benchmarking framework that supports any dataset, pipeline, or metric with automatic ground-truth verification and integrated metrics computation.
+
+## 🚀 Evaluation & Benchmarking
+
+Slug-Search includes a comprehensive evaluation system that enables rigorous assessment of both generation quality and retrieval accuracy:
+
+### ✅ **System Flexibility**
+- **Dataset Support**: Works with datasets that have compatible structure (see [`slug_search/README.md`](slug_search/README.md) for details)
+- **Any Pipeline**: Supports custom RAG pipelines with automatic parameter handling
+- **Any Metric**: Dynamic discovery of metrics - just add functions and they're available
+
+### 📊 **Integrated Metrics**
+- **Generation Metrics**: Multi-ground-truth answer verification
+- **Retrieval Metrics**: Hit rate, precision, and count of ground-truth chunks retrieved
+- **Ground-Truth Analysis**: Automatic verification of whether correct chunks were retrieved
+
+**📚 Documentation:**
+- **System Overview & Quick Start**: [`slug_search/README.md`](slug_search/README.md) - Complete system documentation with setup guide
+- **Evaluation Guide**: [`slug_search/benchmarks/BENCHMARKING_GUIDE.md`](slug_search/benchmarks/BENCHMARKING_GUIDE.md) - Comprehensive evaluation usage
 
 Slug-Search aims to contribute to the understanding of how LLMs can be trained to be more effective and autonomous agents in information-seeking tasks. It serves as a platform for learning and experimentation in advanced RAG techniques, tool use, and applied reinforcement learning.
 

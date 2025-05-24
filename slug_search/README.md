@@ -2,6 +2,92 @@
 
 This directory contains scripts and data for a project involving Large Language Models (LLMs), including components for serving models via VLLM, benchmarking various LLM pipelines, and managing data for these processes.
 
+## 🚀 Quick Start
+
+### Prerequisites
+
+1. **Activate virtual environment**:
+   ```bash
+   source .venv/bin/activate
+   ```
+
+2. **Start VLLM servers** (in separate terminals):
+   ```bash
+   # Generator server (port 8000)
+   python -m vllm.entrypoints.openai.api_server \
+     --model meta-llama/Llama-3.2-3B-Instruct \
+     --port 8000
+
+   # Embedder server (port 8001)  
+   python -m vllm.entrypoints.openai.api_server \
+     --model BAAI/bge-large-en-v1.5 \
+     --port 8001 \
+     --task embed
+   ```
+
+3. **Set environment variables**:
+   ```bash
+   export VLLM_API_KEY="your-api-key"
+   ```
+
+### Basic Usage
+
+**1. Create Vector Store**:
+```bash
+python slug_search/data/datastore.py \
+  --dataset_name lucadiliello/hotpotqa \
+  --split_name train \
+  --text_column context \
+  --drop_old_db
+```
+
+**2. Run Evaluation**:
+```bash
+python slug_search/benchmarks/benchmarking.py \
+  --pipeline_name EmbeddedRAGPipeline \
+  --dataset_path lucadiliello/hotpotqa \
+  --dataset_split validation \
+  --query_column question \
+  --answer_column answer \
+  --generator_model_name meta-llama/Llama-3.2-3B-Instruct \
+  --generator_openai_api_base_url http://localhost:8000/v1 \
+  --generator_openai_api_key_env VLLM_API_KEY \
+  --embedding_model_name_on_vllm BAAI/bge-large-en-v1.5 \
+  --embedder_openai_api_base_url http://localhost:8001/v1 \
+  --embedder_openai_api_key_env VLLM_API_KEY \
+  --metrics "check_answer_correctness_multi_gt;ground_truth_hit_rate;ground_truth_precision" \
+  --summary \
+  --max_queries 10
+```
+
+### Available Metrics
+- `check_answer_correctness_multi_gt`: Generation quality
+- `ground_truth_hit_rate`: Whether ground-truth chunks retrieved
+- `ground_truth_precision`: Proportion of relevant chunks
+- `ground_truth_count`: Number of ground-truth chunks
+
+### Common Commands
+
+**Quick test (10 queries)**:
+```bash
+--max_queries 10 --metrics "ground_truth_hit_rate;check_answer_correctness_multi_gt"
+```
+
+**Full evaluation with summary**:
+```bash
+--metrics "check_answer_correctness_multi_gt;ground_truth_hit_rate;ground_truth_precision;ground_truth_count" --summary
+```
+
+### Output Files
+- `benchmark_results.jsonl`: Individual query results with metrics
+- `benchmark_results_summary.json`: Statistical summary (with `--summary`)
+- `benchmarking.log`: Detailed execution logs
+
+### Troubleshooting
+- **"Unknown metric"**: Check spelling, use `;` to separate
+- **Memory issues**: Lower `--concurrency_limit` or `--max_queries`
+- **API errors**: Verify VLLM servers are running and API keys set
+
 ## Directory Structure
 
 - **`benchmarks/`**: Contains scripts and utilities for benchmarking different LLM interaction pipelines.

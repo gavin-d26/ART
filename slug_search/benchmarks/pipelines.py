@@ -54,6 +54,7 @@ class EmbeddedRAGPipeline(Pipe):
         generator_api_key_env_var: str,
         top_k_retriever: int = 3,
         timeout: float = 60.0 * 10,
+        **kwargs,  # Accept additional parameters for flexibility
     ):
         super().__init__()
         document_store = MilvusDocumentStore(
@@ -119,12 +120,28 @@ class EmbeddedRAGPipeline(Pipe):
             "query_text_embedder": {"text": query},
             "prompt_builder": {"query": query},
         }
-        output = await self.pipeline.run_async(data=pipeline_input_data)
+        output = await self.pipeline.run_async(
+            data=pipeline_input_data,
+            include_outputs_from={"embedding_retriever", "llm_chat_generator"},
+        )
+
+        # Extract retrieved documents
+        retrieved_docs = output["embedding_retriever"]["documents"]
+
         output_dict = {
             "generation": output["llm_chat_generator"]["replies"][0].text,
             "generation_tokens": output["llm_chat_generator"]["replies"][0].meta[
                 "usage"
             ]["completion_tokens"],
+            "retrieved_chunks": [
+                {
+                    "chunk_id": doc.meta.get("chunk_id"),
+                    "original_doc_id": doc.meta.get("original_doc_id"),
+                    "content": doc.content,
+                    "score": getattr(doc, "score", None),  # retrieval confidence score
+                }
+                for doc in retrieved_docs
+            ],
         }
         return output_dict
 
@@ -136,6 +153,7 @@ class NaiveGenerationPipeline(Pipe):
         generator_api_base: str,
         generator_api_key_env_var: str,
         timeout: float = 60.0 * 10,
+        **kwargs,  # Accept additional parameters for flexibility
     ):
         super().__init__()
         template = [ChatMessage.from_user("{{query}}")]
@@ -167,6 +185,7 @@ class NaiveGenerationPipeline(Pipe):
             "generation_tokens": output["llm_chat_generator"]["replies"][0].meta[
                 "usage"
             ]["completion_tokens"],
+            "retrieved_chunks": [],  # No retrieval in this pipeline
         }
         return output_dict
 
@@ -180,6 +199,7 @@ class EmbedderRetrieverPipeline(Pipe):
         embedder_api_key_env_var: str,
         top_k_retriever: int = 3,
         timeout: float = 60.0 * 10,
+        **kwargs,  # Accept additional parameters for flexibility
     ):
         super().__init__()
         document_store = MilvusDocumentStore(
@@ -208,6 +228,21 @@ class EmbedderRetrieverPipeline(Pipe):
         pipeline_input_data = {
             "query_text_embedder": {"text": query},
         }
-        output = await self.pipeline.run_async(data=pipeline_input_data)
-        # Return the retriever's output (documents)
-        return {"documents": output["embedding_retriever"]["documents"]}
+        output = await self.pipeline.run_async(
+            data=pipeline_input_data, include_outputs_from={"embedding_retriever"}
+        )
+
+        retrieved_docs = output["embedding_retriever"]["documents"]
+
+        return {
+            "documents": retrieved_docs,  # Keep existing for backward compatibility
+            "retrieved_chunks": [
+                {
+                    "chunk_id": doc.meta.get("chunk_id"),
+                    "original_doc_id": doc.meta.get("original_doc_id"),
+                    "content": doc.content,
+                    "score": getattr(doc, "score", None),
+                }
+                for doc in retrieved_docs
+            ],
+        }

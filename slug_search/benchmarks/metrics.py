@@ -1,106 +1,111 @@
 import json
 from typing import Callable, List, Union, Dict, Any
 
-# --- Metric Functions ---
+
+# --- Generation Metric Functions ---
+def check_answer_correctness_multi_gt(
+    answer: str, correct_answer: Union[str, list]
+) -> bool:
+    """
+    Check if generated answer contains all required ground truth elements.
+    Adapted from slug_search.training.verifiers.
+
+    Args:
+        answer: Generated answer string
+        correct_answer: Either a JSON string of list or a list directly
+
+    Returns:
+        True if answer contains all ground truth elements, False otherwise
+    """
+    if not isinstance(answer, str) or answer.startswith("Error:"):
+        return False
+
+    # Handle both JSON string and direct list input
+    if isinstance(correct_answer, str):
+        try:
+            correct_answer_list = json.loads(correct_answer)
+        except json.JSONDecodeError:
+            # If it's not valid JSON, treat as single string
+            correct_answer_list = [correct_answer]
+    elif isinstance(correct_answer, list):
+        correct_answer_list = correct_answer
+    else:
+        # Single item that's not a string or list
+        correct_answer_list = [str(correct_answer)]
+
+    # Check if all ground truth elements are present in the answer
+    for answer_item in correct_answer_list:
+        if str(answer_item) not in answer:
+            return False
+    return True
 
 
-def exact_match(generated_answer: str, actual_answer: Union[str, List[str]]) -> float:
+# --- Retrieval Evaluation Metrics ---
+
+
+def ground_truth_hit_rate(ground_truth_analysis: Dict) -> float:
     """
-    Checks for exact match between generated_answer and actual_answer.
-    Returns 0.0 if generated_answer indicates an error or is not a string.
-    If actual_answer is a list, checks if generated_answer is in the list (elements converted to string).
-    If actual_answer is a string, checks for direct equality.
-    Handles cases where actual_answer might be other basic types by converting to string.
+    Calculate hit rate (whether any ground truth chunk was retrieved).
+
+    Args:
+        ground_truth_analysis: Output from check_if_ground_truth_retrieved()
+
+    Returns:
+        1.0 if any ground truth chunk was retrieved, 0.0 otherwise
     """
-    if not isinstance(generated_answer, str) or generated_answer.startswith("Error:"):
+    return 1.0 if ground_truth_analysis.get("ground_truth_retrieved", False) else 0.0
+
+
+def ground_truth_precision(ground_truth_analysis: Dict) -> float:
+    """
+    Calculate precision of ground truth retrieval.
+
+    Args:
+        ground_truth_analysis: Output from check_if_ground_truth_retrieved()
+
+    Returns:
+        Proportion of retrieved chunks that are ground truth
+    """
+    total = ground_truth_analysis.get("total_retrieved", 0)
+    if total == 0:
         return 0.0
-
-    if isinstance(actual_answer, list):
-        # Ensure all elements in actual_answer are strings for comparison
-        return 1.0 if generated_answer in [str(a) for a in actual_answer] else 0.0
-    elif isinstance(actual_answer, str):
-        return 1.0 if generated_answer == actual_answer else 0.0
-    elif actual_answer is None:
-        return 0.0
-    else:  # If actual_answer is neither list nor string (e.g. int, float directly)
-        return 1.0 if generated_answer == str(actual_answer) else 0.0
+    gt_count = ground_truth_analysis.get("num_ground_truth_chunks", 0)
+    return gt_count / total
 
 
-def rouge_l_score(generated_answer: str, actual_answer: Union[str, List[str]]) -> float:
+def ground_truth_count(ground_truth_analysis: Dict) -> int:
     """
-    Placeholder for ROUGE-L F1 score.
-    Requires 'rouge_score' library for actual implementation.
-    Returns -1.0 as a placeholder.
+    Count of ground truth chunks retrieved.
+
+    Args:
+        ground_truth_analysis: Output from check_if_ground_truth_retrieved()
+
+    Returns:
+        Number of ground truth chunks retrieved
     """
-    if not isinstance(generated_answer, str) or generated_answer.startswith("Error:"):
-        return 0.0
-    # Actual implementation would be:
-    # from rouge_score import rouge_scorer
-    # scorer = rouge_scorer.RougeScorer(['rougeL'], use_stemmer=True)
-    # ref_str = ""
-    # if isinstance(actual_answer, list):
-    #     ref_str = str(actual_answer[0]) if actual_answer else ""
-    # elif isinstance(actual_answer, str):
-    #     ref_str = actual_answer
-    # else:
-    #     ref_str = str(actual_answer)
-    # if not generated_answer.strip() and not ref_str.strip(): return 1.0
-    # if not ref_str.strip() or not generated_answer.strip(): return 0.0
-    # scores = scorer.score(ref_str, generated_answer)
-    # return scores['rougeL'].fmeasure
-    print(
-        "Warning: rouge_l_score is a placeholder. Install and import 'rouge_score' for actual calculation."
-    )
-    return -1.0
+    return ground_truth_analysis.get("num_ground_truth_chunks", 0)
 
 
-def bleu_score(generated_answer: str, actual_answer: Union[str, List[str]]) -> float:
-    """
-    Placeholder for BLEU score.
-    Requires 'nltk' library for actual implementation.
-    Returns -1.0 as a placeholder.
-    """
-    if not isinstance(generated_answer, str) or generated_answer.startswith("Error:"):
-        return 0.0
-    # Actual implementation would be:
-    # from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
-    # candidate_tokens = generated_answer.split()
-    # reference_tokens_list = []
-    # if isinstance(actual_answer, list):
-    #     reference_tokens_list = [str(ref).split() for ref in actual_answer if str(ref).strip()]
-    # elif isinstance(actual_answer, str):
-    #     reference_tokens_list = [actual_answer.split()] if actual_answer.strip() else []
-    # else:
-    #     ref_str = str(actual_answer)
-    #     reference_tokens_list = [ref_str.split()] if ref_str.strip() else []
-    # if not candidate_tokens and not any(reference_tokens_list): return 1.0
-    # if not reference_tokens_list or not candidate_tokens : return 0.0
-    # chencherry = SmoothingFunction()
-    # return sentence_bleu(reference_tokens_list, candidate_tokens, smoothing_function=chencherry.method1)
-    print(
-        "Warning: bleu_score is a placeholder. Install and import 'nltk' for actual calculation."
-    )
-    return -1.0
-
-
-# --- Evaluator Function ---
+# --- Enhanced Evaluator Function ---
 
 
 def evaluate_results(
     results_file_path: str,
-    metric_functions: List[Callable[[str, Union[str, List[str]]], float]],
+    metric_functions: List[Callable],
     output_file_path: str,
 ) -> None:
     """
-    Evaluates generation results from a .jsonl file using a list of metric functions.
+    Enhanced evaluation function that handles both generation and retrieval metrics.
 
     Args:
         results_file_path: Path to the .jsonl file containing generation results.
                            Each line should be a JSON object with at least
                            "generated_answer" (str) and "actual_answer" (str or List[str]).
-        metric_functions: A list of functions, where each function takes
-                          (generated_answer: str, actual_answer: Union[str, List[str]])
-                          and returns a float.
+                           For retrieval metrics, should also contain "ground_truth_analysis" (Dict).
+        metric_functions: A list of functions, where each function takes either:
+                          - (generated_answer: str, actual_answer: Union[str, List[str]]) for generation metrics
+                          - (ground_truth_analysis: Dict) for retrieval metrics
+                          and returns a float or int.
         output_file_path: Path to save the evaluated results (as .jsonl).
     """
     evaluated_results = []
@@ -127,6 +132,7 @@ def evaluate_results(
                 actual_answer = result_item.get(
                     "actual_answer"
                 )  # This can be str or list
+                ground_truth_analysis = result_item.get("ground_truth_analysis", {})
 
                 # It's crucial that generated_answer is a string for most metrics.
                 # The benchmarking script aims for this, but errors might make it non-string.
@@ -145,17 +151,23 @@ def evaluate_results(
                             ""  # Or a special marker like "GENERATION_UNAVAILABLE"
                         )
 
+                # Apply all metric functions
                 for metric_fn in metric_functions:
                     metric_name = metric_fn.__name__
                     try:
-                        # Ensure generated_answer is a string before passing to metrics that expect strings
-                        current_gen_ans = (
-                            generated_answer
-                            if isinstance(generated_answer, str)
-                            else str(generated_answer or "")
-                        )
+                        # Check if this is a generation metric or retrieval metric
+                        if metric_name.startswith("ground_truth_"):
+                            # Retrieval metric - pass ground_truth_analysis
+                            metric_value = metric_fn(ground_truth_analysis)
+                        else:
+                            # Generation metric - pass generated and actual answers
+                            current_gen_ans = (
+                                generated_answer
+                                if isinstance(generated_answer, str)
+                                else str(generated_answer or "")
+                            )
+                            metric_value = metric_fn(current_gen_ans, actual_answer)
 
-                        metric_value = metric_fn(current_gen_ans, actual_answer)
                         result_item[metric_name] = metric_value
                     except Exception as e:
                         print(
@@ -167,6 +179,7 @@ def evaluate_results(
 
                 evaluated_results.append(result_item)
 
+        # Save results
         with open(output_file_path, "w", encoding="utf-8") as f_out:
             for item in evaluated_results:
                 f_out.write(json.dumps(item) + "\n")
@@ -243,9 +256,52 @@ if __name__ == "__main__":
             + "\n"
         )
 
-    metrics_to_run = [exact_match, rouge_l_score, bleu_score]
+    # Add some dummy ground truth analysis data for testing retrieval metrics
+    dummy_results_with_gt = []
+    for item in dummy_results_content:
+        # Add dummy ground truth analysis
+        generated_answer = item.get("generated_answer", "") or ""
+        item["ground_truth_analysis"] = {
+            "ground_truth_retrieved": (True if "Paris" in generated_answer else False),
+            "num_ground_truth_chunks": (1 if "Paris" in generated_answer else 0),
+            "num_other_chunks": 2,
+            "total_retrieved": 3,
+        }
+        dummy_results_with_gt.append(item)
 
-    print(f"\nRunning example evaluation on '{dummy_input_path}'...")
+    # Rewrite the dummy file with ground truth analysis
+    with open(dummy_input_path, "w", encoding="utf-8") as f:
+        for item in dummy_results_with_gt:
+            f.write(json.dumps(item) + "\n")
+        # Add an invalid JSON line for testing error handling
+        f.write("this is not valid json\n")
+        f.write(
+            json.dumps(
+                {
+                    "query": "Last valid",
+                    "generated_answer": "yes",
+                    "actual_answer": "yes",
+                    "ground_truth_analysis": {
+                        "ground_truth_retrieved": False,
+                        "num_ground_truth_chunks": 0,
+                        "num_other_chunks": 1,
+                        "total_retrieved": 1,
+                    },
+                }
+            )
+            + "\n"
+        )
+
+    # Test both generation and retrieval metrics
+    metrics_to_run = [
+        ground_truth_hit_rate,
+        ground_truth_precision,
+        ground_truth_count,  # Retrieval metrics
+    ]
+
+    print(
+        f"\nRunning example evaluation with both generation and retrieval metrics on '{dummy_input_path}'..."
+    )
     evaluate_results(dummy_input_path, metrics_to_run, dummy_output_path)
 
     print(f"\nDummy evaluation finished. Check '{dummy_output_path}'.")

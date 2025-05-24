@@ -18,6 +18,7 @@ _embedder_retriever_pipeline = None
 _default_embedding_model_name = "BAAI/bge-large-en-v1.5"
 _default_embedder_api_base = "http://localhost:40002/v1"
 _default_embedder_api_key_env_var = "EMBEDDER_API_KEY"
+_default_top_k = 3
 
 
 def get_or_initialize_document_store() -> MilvusDocumentStore:
@@ -84,7 +85,7 @@ async def search_documents(search_query: str) -> List[str]:
     Returns:
         List[str]: A list of document contents (strings).
     """
-    return await _search_relevant_documents(search_query, top_k=3)
+    return await _search_relevant_documents(search_query, top_k=_default_top_k)
 
 
 async def return_final_answer(answer: str) -> str:
@@ -106,8 +107,9 @@ def configure_search_tools(
     embedding_model_name: Optional[str] = None,
     embedder_api_base: Optional[str] = None,
     embedder_api_key_env_var: Optional[str] = None,
+    top_k: Optional[int] = None,
 ):
-    global _default_milvus_db_path, _default_embedding_model_name, _default_embedder_api_base, _default_embedder_api_key_env_var
+    global _default_milvus_db_path, _default_embedding_model_name, _default_embedder_api_base, _default_embedder_api_key_env_var, _default_top_k
     if milvus_db_path:
         _default_milvus_db_path = milvus_db_path
     if embedding_model_name:
@@ -116,6 +118,8 @@ def configure_search_tools(
         _default_embedder_api_base = embedder_api_base
     if embedder_api_key_env_var:
         _default_embedder_api_key_env_var = embedder_api_key_env_var
+    if top_k:
+        _default_top_k = top_k
 
 
 # Global variable to store the embedding model name

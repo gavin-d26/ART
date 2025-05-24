@@ -9,6 +9,71 @@ from typing import List, Dict, Any
 from vllm import LLM, EngineArgs
 
 
+# --- Query ID and Ground Truth Utilities ---
+def make_unique_doc_id(
+    row: dict, dataset_name: str, split_name: str, index: int
+) -> str:
+    """
+    Generate a unique document ID for a row, matching the logic used when writing to Milvus.
+    """
+    derived_dataset_identifier = (
+        dataset_name.split("/")[-1] if "/" in dataset_name else dataset_name
+    )
+    if "id" in row and row["id"] is not None and str(row["id"]).strip():
+        original_doc_id_base = str(row["id"])
+        if not original_doc_id_base.startswith(
+            f"{derived_dataset_identifier}_{split_name}"
+        ):
+            return f"{derived_dataset_identifier}_{split_name}_{original_doc_id_base}"
+        else:
+            return original_doc_id_base
+    else:
+        return f"{derived_dataset_identifier}_{split_name}_{index}"
+
+
+def extract_document_id_from_query_metadata(
+    query_row: dict, dataset_name: str, split_name: str, index: int
+) -> str:
+    """
+    Extract the document ID that corresponds to a query for ground-truth verification.
+    Uses the same logic as make_unique_doc_id.
+    """
+    return make_unique_doc_id(query_row, dataset_name, split_name, index)
+
+
+def check_if_ground_truth_retrieved(
+    retrieved_chunks: List[Dict], query_document_id: str
+) -> Dict[str, Any]:
+    """
+    Check if any ground-truth chunks were retrieved for a given query.
+
+    Args:
+        retrieved_chunks: List of retrieved chunk dictionaries with metadata
+        query_document_id: Document ID corresponding to the query
+
+    Returns:
+        Dictionary with retrieval analysis results
+    """
+    ground_truth_chunks = []
+    other_chunks = []
+
+    for chunk in retrieved_chunks:
+        chunk_id = chunk.get("chunk_id", "")
+        if chunk_id.startswith(query_document_id):
+            ground_truth_chunks.append(chunk)
+        else:
+            other_chunks.append(chunk)
+
+    return {
+        "ground_truth_retrieved": len(ground_truth_chunks) > 0,
+        "num_ground_truth_chunks": len(ground_truth_chunks),
+        "num_other_chunks": len(other_chunks),
+        "ground_truth_chunks": ground_truth_chunks,
+        "other_chunks": other_chunks,
+        "total_retrieved": len(retrieved_chunks),
+    }
+
+
 # --- Configuration & Argument Parsing ---
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -109,37 +174,68 @@ def create_haystack_documents(
     text_column: str,
     metadata_columns: List[str],
     preprocess_fn: callable,
+    dataset_name: str = None,  # New parameter for unique ID generation
+    split_name: str = None,  # New parameter for unique ID generation
 ) -> List[Document]:
     """
-    Processes text from the DataFrame and creates Haystack Documents (without embeddings initially).
+    Processes text from the DataFrame and creates Haystack Documents with unique IDs across splits.
+
+    Args:
+        df: DataFrame containing the data
+        text_column: Column name containing text to embed
+        metadata_columns: List of metadata column names to include
+        preprocess_fn: Function to preprocess/chunk the text
+        dataset_name: Name of the dataset (e.g., "lucadiliello/hotpotqa")
+        split_name: Split name (e.g., "train", "validation")
+
+    Returns:
+        List of Haystack Document objects with unique chunk IDs
     """
     print("Creating Haystack Document objects...")
     haystack_documents: List[Document] = []
+
+    # Derive dataset_identifier from dataset_name for unique ID generation
+    if dataset_name:
+        derived_dataset_identifier = (
+            dataset_name.split("/")[-1] if "/" in dataset_name else dataset_name
+        )
+    else:
+        derived_dataset_identifier = "unknown_dataset"
+        print(
+            "Warning: dataset_name not provided, using 'unknown_dataset' as identifier"
+        )
+
+    if not split_name:
+        split_name = "unknown_split"
+        print("Warning: split_name not provided, using 'unknown_split' as identifier")
+
+    # Ensure index is 0-based and sequential for ID consistency
+    df = df.reset_index(drop=True)
+
     for index, row in df.iterrows():
         text_content = row[text_column]
         if not text_content or not isinstance(text_content, str):
-            print(
-                f"Skipping row {index} due to empty or invalid text content in column '{text_column}'."
-            )
+            print(f"Skipping row {index} due to empty or invalid text content in column '{text_column}'.") # fmt: skip
+            print(f"Row: {row}")
             continue
 
-        # Check if all metadata columns to embed exist in the row, if specified
-        # This check is more relevant if meta_fields_to_embed is used extensively.
-        # For now, we just ensure the main text_column is present.
+        original_doc_id = make_unique_doc_id(row, dataset_name, split_name, index)
 
         chunks = preprocess_fn(text_content)
         for i, chunk in enumerate(chunks):
-            meta_data: Dict[str, Any] = {"original_doc_id": str(row.get("id", index))}
+            meta_data: Dict[str, Any] = {
+                "original_doc_id": original_doc_id,
+                "split_name": split_name,
+                "dataset_name": dataset_name,
+                "derived_dataset_identifier": derived_dataset_identifier,
+                "original_index_in_split": index,
+            }
+
             for meta_col in metadata_columns:
                 if meta_col in row:
                     meta_data[meta_col] = row[meta_col]
-                # else:
-                #     print(f"Warning: Metadata column '{meta_col}' not found in row {index}.")
-            meta_data["chunk_id"] = f"{meta_data['original_doc_id']}_{i}"
 
-            # Ensure all meta_fields_to_embed are present in meta_data if they are expected by the embedder
-            # The embedder might raise an error if a field listed in meta_fields_to_embed is missing.
-            # For simplicity, this example assumes they will be present if specified.
+            meta_data["chunk_id"] = f"{original_doc_id}_chunk_{i}"
 
             doc = Document(content=chunk, meta=meta_data)
             haystack_documents.append(doc)
@@ -192,12 +288,15 @@ if __name__ == "__main__":
         )
         preprocess_function_to_use = preprocess_and_chunk_text
 
-    # 2. Create Haystack Documents (without embeddings yet)
+    # 2. Create Haystack Documents with enhanced metadata
+    #    Pass existing args.dataset_name and args.split_name
     documents_to_embed = create_haystack_documents(
         df=dataframe,
         text_column=args.text_column,
         metadata_columns=args.metadata_columns,
         preprocess_fn=preprocess_function_to_use,
+        dataset_name=args.dataset_name,  # Pass the original dataset name
+        split_name=args.split_name,  # Pass the split name
     )
 
     if not documents_to_embed:
@@ -219,6 +318,7 @@ if __name__ == "__main__":
             "max_docs",
             "drop_old_db",
             "metadata_columns",
+            "preprocess_function",
         }
 
         # Filter arguments to pass only VLLM-relevant ones.
