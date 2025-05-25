@@ -1,6 +1,10 @@
 import json
+import logging
 import numpy as np
 from typing import Dict, List, Any
+
+# Get logger for this module
+logger = logging.getLogger(__name__)
 
 
 def generate_evaluation_summary(results_file_path: str) -> Dict[str, Any]:
@@ -110,31 +114,31 @@ def generate_insights(metrics_summary: Dict[str, Dict[str, float]]) -> List[str]
 
 def print_summary(summary: Dict[str, Any]) -> None:
     """Print a formatted summary to console."""
-    print("\n" + "=" * 60)
-    print("EVALUATION SUMMARY")
-    print("=" * 60)
-    print(f"Total Queries: {summary['total_queries']}")
-    print()
+    logger.info("\n" + "=" * 60)
+    logger.info("EVALUATION SUMMARY")
+    logger.info("=" * 60)
+    logger.info(f"Total Queries: {summary['total_queries']}")
+    logger.info("")
 
     if summary["metrics_summary"]:
-        print("METRICS SUMMARY:")
-        print("-" * 40)
+        logger.info("METRICS SUMMARY:")
+        logger.info("-" * 40)
         for metric, stats in summary["metrics_summary"].items():
-            print(f"{metric}:")
-            print(f"  Mean: {stats['mean']:.4f}")
-            print(f"  Std:  {stats['std']:.4f}")
-            print(f"  Min:  {stats['min']:.4f}")
-            print(f"  Max:  {stats['max']:.4f}")
-            print()
+            logger.info(f"{metric}:")
+            logger.info(f"  Mean: {stats['mean']:.4f}")
+            logger.info(f"  Std:  {stats['std']:.4f}")
+            logger.info(f"  Min:  {stats['min']:.4f}")
+            logger.info(f"  Max:  {stats['max']:.4f}")
+            logger.info("")
 
     if summary["insights"]:
-        print("KEY INSIGHTS:")
-        print("-" * 40)
+        logger.info("KEY INSIGHTS:")
+        logger.info("-" * 40)
         for i, insight in enumerate(summary["insights"], 1):
-            print(f"{i}. {insight}")
-        print()
+            logger.info(f"{i}. {insight}")
+        logger.info("")
 
-    print("=" * 60)
+    logger.info("=" * 60)
 
 
 def save_summary(summary: Dict[str, Any], output_path: str) -> None:

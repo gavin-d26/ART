@@ -3,9 +3,11 @@ import asyncio
 import logging
 import os
 import pandas as pd
+import sys
 from datasets import load_dataset
 from importlib import import_module
 import json
+from tqdm.asyncio import tqdm
 
 # Import Phase 1 utilities for ground-truth analysis
 from slug_search.data.datastore import (
@@ -23,13 +25,39 @@ from slug_search.benchmarks.analysis import (
     save_summary,
 )
 
+# Import search tools configuration
+from slug_search.training.search_tools import configure_search_tools
+
+
 # --- Logging Setup ---
+# Create a custom logger that redirects all output to log file
+class LogRedirector:
+    def __init__(self, logger, level):
+        self.logger = logger
+        self.level = level
+        self.buffer = ""
+
+    def write(self, message):
+        if message.strip():
+            self.logger.log(self.level, message.strip())
+
+    def flush(self):
+        pass
+
+
+# Configure logging to capture everything
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[logging.FileHandler("benchmarking.log")],
+    handlers=[
+        logging.FileHandler("benchmarking.log"),
+        logging.StreamHandler(sys.stderr),  # Keep stderr for progress bar
+    ],
 )
 logger = logging.getLogger(__name__)
+
+# Redirect stdout to logger (but keep stderr for progress bar)
+sys.stdout = LogRedirector(logger, logging.INFO)
 
 TIMEOUT = 60.0 * 20
 
@@ -188,6 +216,46 @@ def parse_args():
         action="store_true",
         help="Generate evaluation summary with statistics and insights after benchmarking. Requires --metrics to be specified. Creates both console output and JSON summary file.",
     )
+
+    # Agent-specific arguments for AgenticToolCallingPipeline
+    parser.add_argument(
+        "--agent_query_prompt_template_key",
+        type=str,
+        default="default_query_prompt",
+        help="Key to load prompt template from prompts.json for the agent (template should contain {{query}} placeholder).",
+    )
+    parser.add_argument(
+        "--unknown_tool_handling_strategy",
+        type=str,
+        choices=["error_to_model", "break_loop"],
+        default="break_loop",
+        help="Strategy for handling unknown tool calls: 'error_to_model' or 'break_loop'.",
+    )
+    parser.add_argument(
+        "--search_tool_top_k",
+        type=int,
+        default=3,
+        help="Top-k documents to retrieve for the search tool.",
+    )
+    parser.add_argument(
+        "--max_agent_steps",
+        type=int,
+        default=5,
+        help="Maximum number of agent steps before termination.",
+    )
+    parser.add_argument(
+        "--agent_llm_sampling_params",
+        type=str,
+        default=None,
+        help="JSON string of sampling parameters for the agent LLM (e.g., '{\"temperature\": 0.7}').",
+    )
+    parser.add_argument(
+        "--top_k_retriever",
+        type=int,
+        default=3,
+        help="Top-k documents to retrieve by the main retriever in the RAG pipeline (distinct from agent's search_tool_top_k).",
+    )
+
     return parser.parse_args()
 
 
@@ -290,6 +358,25 @@ async def main():
 
     logger.info(f"Instantiating Haystack pipeline from class '{args.pipeline_name}'...")
     try:
+        # Configure search tools globally before pipeline instantiation
+        configure_search_tools(
+            milvus_db_path=args.milvus_db_path,
+            embedding_model_name=args.embedding_model_name_on_vllm,
+            embedder_api_base=args.embedder_openai_api_base_url,
+            embedder_api_key_env_var=embedder_api_key_env_name,
+            top_k=args.search_tool_top_k,
+        )
+
+        # Parse agent LLM sampling params if provided
+        agent_llm_sampling_params = None
+        if args.agent_llm_sampling_params:
+            try:
+                agent_llm_sampling_params = json.loads(args.agent_llm_sampling_params)
+            except json.JSONDecodeError as e:
+                logger.warning(
+                    f"Failed to parse agent_llm_sampling_params: {e}. Using defaults."
+                )
+
         # Prepare all possible parameters - pipelines will accept what they need via **kwargs
         pipeline_params = {
             "milvus_path": args.milvus_db_path,
@@ -302,7 +389,17 @@ async def main():
             "generator_model_name": args.generator_model_name,
             "generator_api_base": args.generator_openai_api_base_url,
             "generator_api_key_env_var": generator_api_key_env_name,
+            "top_k_retriever": args.top_k_retriever,
             "timeout": TIMEOUT,
+            # Agent-specific parameters
+            "agent_llm_model_name": args.generator_model_name,
+            "agent_llm_api_base_url": args.generator_openai_api_base_url,
+            "agent_llm_api_key_env_var": generator_api_key_env_name,
+            "agent_query_prompt_template_key": args.agent_query_prompt_template_key,
+            "unknown_tool_handling_strategy": args.unknown_tool_handling_strategy,
+            "search_tool_top_k": args.search_tool_top_k,
+            "max_agent_steps": args.max_agent_steps,
+            "agent_llm_sampling_params": agent_llm_sampling_params,
         }
 
         # Instantiate the pipeline class - it will accept what it needs via **kwargs
@@ -322,9 +419,7 @@ async def main():
         query_text, actual_answer, pipeline_instance, p_id, query_row, index
     ):
         async with semaphore:  # Acquire semaphore
-            logger.info(
-                f'Semaphore acquired for query ID {p_id}. Starting processing: "{query_text[:100]}..."'
-            )
+            logger.debug(f'Processing query ID {p_id}: "{query_text[:50]}..."')
             try:
                 # pipeline_input_data is now constructed inside the pipeline's run_pipeline method
                 # Use run_pipeline() for non-blocking execution, passing only the query
@@ -339,6 +434,9 @@ async def main():
 
                 # Phase 3: Extract retrieved chunks from pipeline output
                 retrieved_chunks = pipeline_output.get("retrieved_chunks", [])
+
+                # Extract tool_log from pipeline output (for agent pipelines)
+                tool_log = pipeline_output.get("tool_log", [])
 
                 # Phase 3: Ground-truth analysis (if enabled)
                 ground_truth_analysis = {}
@@ -356,7 +454,7 @@ async def main():
                             retrieved_chunks, query_document_id
                         )
 
-                        logger.info(
+                        logger.debug(
                             f"Query ID {p_id}: Ground-truth analysis - "
                             f"Retrieved: {ground_truth_analysis.get('ground_truth_retrieved', False)}, "
                             f"GT chunks: {ground_truth_analysis.get('num_ground_truth_chunks', 0)}, "
@@ -368,9 +466,7 @@ async def main():
                         )
                         ground_truth_analysis = {"error": str(gt_error)}
 
-                logger.info(
-                    f"Finished query ID {p_id}. Query: {query_text}, Actual: {actual_answer}, Generated: {generated_answer}, Tokens: {generated_tokens}"
-                )
+                logger.debug(f"Completed query ID {p_id}. Tokens: {generated_tokens}")
 
                 # Phase 3: Enhanced result format
                 result = {
@@ -383,6 +479,10 @@ async def main():
                     "retrieved_chunks": retrieved_chunks,
                 }
 
+                # Add tool_log if available (for agent pipelines)
+                if tool_log:
+                    result["tool_log"] = tool_log
+
                 # Add ground-truth analysis if enabled and successful
                 if args.enable_ground_truth_analysis and ground_truth_analysis:
                     result["ground_truth_analysis"] = ground_truth_analysis
@@ -391,7 +491,7 @@ async def main():
 
             except Exception as e:
                 logger.error(
-                    f'Error running pipeline for query ID {p_id} ("{query_text}"): {e}',
+                    f'Error running pipeline for query ID {p_id} ("{query_text[:50]}..."): {e}',
                     exc_info=True,
                 )
                 return {
@@ -401,6 +501,7 @@ async def main():
                     "generated_answer": f"Error: {e}",
                     "generation_tokens": 0,
                     "retrieved_chunks": [],
+                    "tool_log": [],
                 }
             # Semaphore is released automatically when exiting the 'async with' block
 
@@ -427,7 +528,48 @@ async def main():
     logger.info(
         f"Gathering results for {len(tasks)} queries concurrently with a limit of {CONCURRENCY_LIMIT}..."
     )
-    results_list = await asyncio.gather(*tasks)
+
+    # Use tqdm progress bar for task completion tracking
+    progress_bar = tqdm(
+        total=len(tasks),
+        desc="Processing queries",
+        unit="query",
+        file=sys.stderr,  # Use stderr to avoid logging redirection
+        dynamic_ncols=True,
+        leave=True,
+    )
+
+    # Process tasks with progress tracking
+    results_list = []
+    completed_tasks = []
+
+    # Convert tasks to asyncio tasks for better control
+    async_tasks = [asyncio.create_task(task) for task in tasks]
+
+    # Process tasks as they complete
+    for completed_task in asyncio.as_completed(async_tasks):
+        try:
+            result = await completed_task
+            results_list.append(result)
+            progress_bar.update(1)
+        except Exception as e:
+            logger.error(f"Task failed: {e}")
+            # Add error result to maintain consistency
+            results_list.append(
+                {
+                    "query_id": f"error_{len(results_list)}",
+                    "query": "Error",
+                    "actual_answer": "Error",
+                    "generated_answer": f"Task failed: {e}",
+                    "generation_tokens": 0,
+                    "retrieved_chunks": [],
+                    "tool_log": [],
+                }
+            )
+            progress_bar.update(1)
+
+    progress_bar.close()
+    logger.info(f"Completed processing {len(results_list)} queries")
 
     # Filter out None results if any task failed critically before returning a dict (though current process_query always returns a dict)
     results = [res for res in results_list if isinstance(res, dict)]

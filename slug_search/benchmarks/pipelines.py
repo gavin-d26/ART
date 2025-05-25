@@ -13,6 +13,9 @@ from haystack.dataclasses import ChatMessage
 from haystack.utils import Secret
 
 import dotenv
+import json
+import re
+from typing import Optional, Dict
 
 dotenv.load_dotenv()
 
@@ -85,8 +88,6 @@ class EmbeddedRAGPipeline(Pipe):
     </documents>
     
     <question> {{query}} </question>
-    
-    <answer>
     """
         prompt_builder = ChatPromptBuilder(template=[ChatMessage.from_user(template)])
 
@@ -128,8 +129,14 @@ class EmbeddedRAGPipeline(Pipe):
         # Extract retrieved documents
         retrieved_docs = output["embedding_retriever"]["documents"]
 
+        # Extract the raw generation text
+        raw_generation = output["llm_chat_generator"]["replies"][0].text
+
+        # Extract answer from <answer> tags, fallback to raw text if no tags found
+        extracted_answer = extract_answer_from_tags(raw_generation, "answer")
+
         output_dict = {
-            "generation": output["llm_chat_generator"]["replies"][0].text,
+            "generation": extracted_answer,
             "generation_tokens": output["llm_chat_generator"]["replies"][0].meta[
                 "usage"
             ]["completion_tokens"],
@@ -156,8 +163,15 @@ class NaiveGenerationPipeline(Pipe):
         **kwargs,  # Accept additional parameters for flexibility
     ):
         super().__init__()
-        template = [ChatMessage.from_user("{{query}}")]
-        prompt_builder = ChatPromptBuilder(template=template)
+        template = """
+    Please answer the question given within the <question> tags. Provide your final answer within 
+    <answer> 
+    Your Final Answer 
+    </answer> tags.
+    
+    <question> {{query}} </question>
+    """
+        prompt_builder = ChatPromptBuilder(template=[ChatMessage.from_user(template)])
 
         llm_chat_generator = OpenAIChatGenerator(
             model=generator_model_name,
@@ -180,8 +194,15 @@ class NaiveGenerationPipeline(Pipe):
             "prompt_builder": {"query": query},
         }
         output = await self.pipeline.run_async(data=pipeline_input_data)
+
+        # Extract the raw generation text
+        raw_generation = output["llm_chat_generator"]["replies"][0].text
+
+        # Extract answer from <answer> tags, fallback to raw text if no tags found
+        extracted_answer = extract_answer_from_tags(raw_generation, "answer")
+
         output_dict = {
-            "generation": output["llm_chat_generator"]["replies"][0].text,
+            "generation": extracted_answer,
             "generation_tokens": output["llm_chat_generator"]["replies"][0].meta[
                 "usage"
             ]["completion_tokens"],
@@ -246,3 +267,125 @@ class EmbedderRetrieverPipeline(Pipe):
                 for doc in retrieved_docs
             ],
         }
+
+
+class AgenticToolCallingPipeline(Pipe):
+    """
+    Pipeline that implements an agentic tool-calling system for benchmarking.
+    """
+
+    def __init__(
+        self,
+        agent_llm_model_name: str,
+        agent_llm_api_base_url: str,
+        agent_llm_api_key_env_var: str,
+        agent_query_prompt_template_key: str,
+        unknown_tool_handling_strategy: str,
+        search_tool_top_k: int = 3,
+        agent_llm_sampling_params: Optional[Dict] = None,
+        max_agent_steps: int = 5,
+        timeout: float = 60.0 * 10,
+        **kwargs,
+    ):
+        """
+        Initialize the AgenticToolCallingPipeline.
+
+        Args:
+            agent_llm_model_name: Name of the LLM model for the agent
+            agent_llm_api_base_url: Base URL for the agent LLM API
+            agent_llm_api_key_env_var: Environment variable name for API key
+            agent_query_prompt_template_key: Key to load prompt template from prompts.json
+            unknown_tool_handling_strategy: Strategy for handling unknown tools
+            search_tool_top_k: Top-k for search tool
+            agent_llm_sampling_params: Optional sampling parameters for LLM
+            max_agent_steps: Maximum number of agent steps
+            timeout: Timeout for LLM calls
+            **kwargs: Additional parameters for flexibility
+        """
+        super().__init__()
+
+        # Import here to avoid circular imports
+        from slug_search.benchmarks.agent_component import CustomAgentComponent
+
+        # Load system prompt from prompts.json
+        try:
+            with open("slug_search/training/prompts.json", "r") as f:
+                prompts = json.load(f)
+            prompt_template = prompts.get(agent_query_prompt_template_key, "")
+            if not prompt_template:
+                raise ValueError(
+                    f"Prompt template key '{agent_query_prompt_template_key}' not found in prompts.json"
+                )
+        except Exception as e:
+            raise ValueError(f"Failed to load prompt template: {str(e)}")
+
+        # Create the custom agent component
+        custom_agent_component = CustomAgentComponent(
+            llm_model_name=agent_llm_model_name,
+            llm_api_base_url=agent_llm_api_base_url,
+            llm_api_key_env_var=agent_llm_api_key_env_var,
+            prompt_template=prompt_template,
+            search_tool_top_k=search_tool_top_k,
+            llm_sampling_params=agent_llm_sampling_params,
+            max_agent_steps=max_agent_steps,
+            unknown_tool_handling_strategy=unknown_tool_handling_strategy,
+            timeout=timeout,
+        )
+
+        # Create the pipeline
+        self.pipeline = AsyncPipeline()
+        self.pipeline.add_component("custom_agent", custom_agent_component)
+
+    async def run_pipeline(self, query: str) -> dict:
+        """
+        Run the agentic tool-calling pipeline.
+
+        Args:
+            query: The input query string
+
+        Returns:
+            Dictionary containing generation, generation_tokens, retrieved_chunks, and tool_log
+        """
+        if not self.pipeline:
+            raise RuntimeError("Pipeline has not been initialized.")
+
+        pipeline_input_data = {"custom_agent": {"query": query}}
+
+        output = await self.pipeline.run_async(
+            data=pipeline_input_data, include_outputs_from={"custom_agent"}
+        )
+
+        # Extract the output from the custom agent
+        agent_output = output["custom_agent"]["output_data"]
+
+        return {
+            "generation": agent_output.get("generation", ""),
+            "generation_tokens": agent_output.get("generation_tokens", 0),
+            "retrieved_chunks": agent_output.get("retrieved_chunks", []),
+            "tool_log": agent_output.get("tool_log", []),
+        }
+
+
+def extract_answer_from_tags(text: str, tag: str = "answer") -> str:
+    """
+    Extract content from XML-like tags in the text.
+
+    Args:
+        text: The input text containing tags
+        tag: The tag name to extract from (default: "answer")
+
+    Returns:
+        The extracted content, or the original text if no tags found
+    """
+    # Pattern to match opening and closing tags with content in between
+    pattern = rf"<{tag}>\s*(.*?)\s*</{tag}>"
+
+    # Search for the pattern (case-insensitive, multiline, dotall)
+    match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+
+    if match:
+        # Return the content inside the tags, stripped of leading/trailing whitespace
+        return match.group(1).strip()
+
+    # If no tags found, return the original text
+    return text
