@@ -116,6 +116,17 @@ for i in "${!SPLITS[@]}"; do
     echo ""
 done
 
+# After all splits are processed, create a training DB copy
+TRAINING_DB_PATH="${MILVUS_DB_PATH%.*}_training.${MILVUS_DB_PATH##*.}"
+
+if [ -f "$TRAINING_DB_PATH" ]; then
+    echo "Deleting existing training DB at $TRAINING_DB_PATH..."
+    rm "$TRAINING_DB_PATH"
+fi
+
+cp "$MILVUS_DB_PATH" "$TRAINING_DB_PATH"
+echo "✅ Training DB created at: $TRAINING_DB_PATH"
+
 echo "============================================================"
 echo "🎉 Datastore creation finished successfully!"
 echo "============================================================"
