@@ -238,7 +238,7 @@ class LocalBackend(Backend):
         os.makedirs(parent_dir, exist_ok=True)
 
         # Get the file name for the current iteration, or default to 0 for non-trainable models
-        iteration = self.__get_step(model) if isinstance(model, TrainableModel) else 0
+        iteration = self.__get_step(model) if model.trainable else 0
         file_name = f"{iteration:04d}.yaml"
 
         # Write the logs to the file
@@ -273,7 +273,7 @@ class LocalBackend(Backend):
         # Calculate average standard deviation of rewards within groups
         averages["reward_std_dev"] = calculate_step_std_dev(trajectory_groups)
 
-        if isinstance(model, TrainableModel):
+        if model.trainable:
             self._log_metrics(model, averages, split)
 
     def _trajectory_log(self, trajectory: Trajectory) -> str:
@@ -294,9 +294,16 @@ class LocalBackend(Backend):
         trajectory_groups: list[TrajectoryGroup],
         config: TrainConfig,
         dev_config: dev.TrainConfig,
+        verbose: bool = False,
     ) -> AsyncIterator[dict[str, float]]:
+        if verbose:
+            print("Starting _train_model")
         service = await self._get_service(model)
+        if verbose:
+            print("Logging training data to disk...")
         await self._log(model, trajectory_groups, "train")
+        if verbose:
+            print("Packing tensors...")
         packed_tensors = self._get_packed_tensors(
             model, trajectory_groups, plot_tensors=False
         )
@@ -313,17 +320,24 @@ class LocalBackend(Backend):
         results: list[dict[str, float]] = []
         num_gradient_steps = disk_packed_tensors["num_sequences"]
         pbar = tqdm.tqdm(total=num_gradient_steps, desc="train")
-        async for result in service.train(disk_packed_tensors, config, dev_config):
+        async for result in service.train(
+            disk_packed_tensors, config, dev_config, verbose
+        ):
             results.append(result)
             yield {**result, "num_gradient_steps": num_gradient_steps}
             pbar.update(1)
             pbar.set_postfix(result)
         pbar.close()
+
+        if verbose:
+            print("Logging metrics...")
         data = {
             k: sum(d.get(k, 0) for d in results) / sum(1 for d in results if k in d)
             for k in {k for d in results for k in d}
         }
         self._log_metrics(model, data, "train", step_offset=-1)
+        if verbose:
+            print("_train_model complete")
 
     def _log_metrics(
         self,
@@ -338,9 +352,7 @@ class LocalBackend(Backend):
             if split
             else metrics
         )
-        step = (
-            self.__get_step(model) if isinstance(model, TrainableModel) else 0
-        ) + step_offset
+        step = (self.__get_step(model) if model.trainable else 0) + step_offset
 
         # If we have a W&B run, log the data there
         if run := self._get_wandb_run(model):
@@ -373,15 +385,25 @@ class LocalBackend(Backend):
     async def _experimental_pull_from_s3(
         self,
         model: Model,
+        step: int | None = None,
         s3_bucket: str | None = None,
         prefix: str | None = None,
         verbose: bool = False,
         delete: bool = False,
     ) -> None:
-        """Download the model directory from S3 into local Backend storage. Right now this can be used to pull trajectory logs for processing or model checkpoints."""
+        """Download the model directory from S3 into local Backend storage. Right now this can be used to pull trajectory logs for processing or model checkpoints.
+        Args:
+            model: The model to pull from S3.
+            step: A specific step to pull from S3. If None, all steps will be pulled.
+            s3_bucket: The S3 bucket to pull from. If None, the default bucket will be used.
+            prefix: The prefix to pull from S3. If None, the model name will be used.
+            verbose: Whether to print verbose output.
+            delete: Whether to delete the local model directory.
+        """
         await pull_model_from_s3(
             model_name=model.name,
             project=model.project,
+            step=step,
             s3_bucket=s3_bucket,
             prefix=prefix,
             verbose=verbose,
@@ -429,6 +451,7 @@ class LocalBackend(Backend):
             # pull the latest step from S3
             await self._experimental_pull_from_s3(
                 model,
+                step=step,
                 s3_bucket=s3_bucket,
                 prefix=prefix,
                 verbose=verbose,

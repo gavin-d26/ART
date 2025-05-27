@@ -27,6 +27,7 @@ def get_openai_server_config(
         num_scheduler_steps=16,
         served_model_name=base_model,
         disable_log_requests=True,
+        generation_config="vllm",
     )
     engine_args.update(config.get("engine_args", {}))
     return OpenAIServerConfig(
