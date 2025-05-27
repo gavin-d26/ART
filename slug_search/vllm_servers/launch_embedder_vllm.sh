@@ -42,7 +42,7 @@ python -m vllm.entrypoints.openai.api_server \
     --host "0.0.0.0" \
     --served-model-name "$MODEL_NAME" \
     --task "$TASK_TYPE" \
-    --gpu-memory-utilization 0.40 \
+    --gpu-memory-utilization 0.95 \
     # --max-model-len 8192 \ # BGE models can have larger sequence lengths
     # Add other VLLM arguments below as needed, for example:
     # --tensor-parallel-size 1 \

@@ -1,6 +1,12 @@
 from typing import Dict, Any
 import asyncio
 from haystack import component
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
 from slug_search.training.search_tools import (
     get_or_initialize_embedder_retriever_pipeline,
 )
@@ -35,9 +41,15 @@ class SearchDocumentsComponent:
         """
         return asyncio.run(self._run_async(query))
 
-    async def _run_async(self, query: str) -> Dict[str, Dict[str, Any]]:
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError, Exception)),
+        reraise=True,
+    )
+    async def _run_async_with_retry(self, query: str) -> Dict[str, Dict[str, Any]]:
         """
-        Internal async method to search for relevant documents.
+        Internal async method to search for relevant documents with tenacity retry logic.
 
         Args:
             query: The search query string
@@ -67,6 +79,30 @@ class SearchDocumentsComponent:
                 "benchmark_document_chunks": retrieved_docs_for_benchmark,
             }
         }
+
+    async def _run_async(self, query: str) -> Dict[str, Dict[str, Any]]:
+        """
+        Internal async method to search for relevant documents with fallback handling.
+
+        Args:
+            query: The search query string
+
+        Returns:
+            Dictionary containing llm_context_string and benchmark_document_chunks
+        """
+        try:
+            return await self._run_async_with_retry(query)
+        except Exception as e:
+            # If all retries failed, return empty results with error message
+            print(
+                f"All search attempts failed. Returning empty results. Last error: {e}"
+            )
+            return {
+                "output_data": {
+                    "llm_context_string": "No documents retrieved due to connection error.",
+                    "benchmark_document_chunks": [],
+                }
+            }
 
 
 @component

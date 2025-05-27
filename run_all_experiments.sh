@@ -14,7 +14,6 @@ set -e  # Exit immediately if any command fails
 VENV_PATH=".venv/bin/activate"
 
 # Pipelines to test
-# PIPELINES_TO_RUN=("EmbeddedRAGPipeline" "NaiveGenerationPipeline" "AgenticToolCallingPipeline")
 PIPELINES_TO_RUN=("AgenticToolCallingPipeline")
 
 # Top-k values to test for retrieval pipelines

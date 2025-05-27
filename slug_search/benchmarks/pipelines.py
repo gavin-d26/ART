@@ -231,6 +231,8 @@ class EmbedderRetrieverPipeline(Pipe):
             api_key=Secret.from_env_var(embedder_api_key_env_var),
             model=embedding_model_name,
             timeout=timeout,
+            # Add connection limits to prevent too many concurrent connections
+            max_retries=3,
         )
         embedding_retriever = MilvusEmbeddingRetriever(
             document_store=document_store, top_k=top_k_retriever
