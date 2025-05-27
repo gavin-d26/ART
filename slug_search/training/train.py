@@ -177,11 +177,31 @@ async def run_training(
     project_name: str,
     current_project_policy_config: ProjectPolicyConfig,
 ):
+    # Convert vLLM config to internal config
+    internal_config = None
+    if current_project_policy_config.vllm_config:
+        vllm_dict = current_project_policy_config.vllm_config.model_dump()
+        # Only include non-default values to keep config clean
+        engine_args = {}
+
+        # Only add values that differ from defaults or are explicitly set
+        if vllm_dict.get("enforce_eager", False):
+            engine_args["enforce_eager"] = True
+        if vllm_dict.get("gpu_memory_utilization", 0.95) != 0.95:
+            engine_args["gpu_memory_utilization"] = vllm_dict["gpu_memory_utilization"]
+        if vllm_dict.get("max_model_len") is not None:
+            engine_args["max_model_len"] = vllm_dict["max_model_len"]
+
+        if engine_args:
+            internal_config = art.dev.InternalModelConfig(engine_args=engine_args)
+            print(f"Using vLLM engine args: {engine_args}")
+
     model = art.TrainableModel(
         name=model_name,
         project=project_name,
         base_model=current_project_policy_config.base_model,
         config=current_project_policy_config,
+        _internal_config=internal_config,
     )
 
     backend = LocalBackend()
@@ -326,11 +346,26 @@ if __name__ == "__main__":
         debug_project_policy_config.training_config.groups_per_step = 1
         debug_project_policy_config.training_config.num_epochs = 1
 
+        # Configure vLLM settings for debug mode
+        debug_project_policy_config.vllm_config.enforce_eager = True
+        debug_project_policy_config.vllm_config.gpu_memory_utilization = 0.8
+        debug_project_policy_config.vllm_config.max_model_len = (
+            4096  # Smaller context for faster debugging
+        )
+
         print("Running in DEBUG mode with minimal configuration.")
+        print(
+            f"Debug vLLM config: enforce_eager={debug_project_policy_config.vllm_config.enforce_eager}, "
+            f"gpu_memory_utilization={debug_project_policy_config.vllm_config.gpu_memory_utilization}"
+        )
         asyncio.run(run_training(model_name, project_name, debug_project_policy_config))
     else:
         model_name = "slug-search-agent-001"
         project_name = "slug_search_project"
+        print(
+            f"Production vLLM config: enforce_eager={project_policy_config.vllm_config.enforce_eager}, "
+            f"gpu_memory_utilization={project_policy_config.vllm_config.gpu_memory_utilization}"
+        )
         asyncio.run(run_training(model_name, project_name, project_policy_config))
 
     # garbage collection

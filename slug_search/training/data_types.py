@@ -3,6 +3,13 @@ from pydantic import BaseModel
 
 # fmt: off
 
+class VLLMConfig(BaseModel):
+    """Configuration for vLLM engine arguments"""
+    enforce_eager: bool = False
+    gpu_memory_utilization: float = 0.95
+    max_model_len: Optional[int] = None
+
+
 class TrainingConfig(BaseModel):
     trajectories_per_group: int = 6
     groups_per_step: int = 1  # This will be the batch_size for the dataloader
@@ -18,6 +25,7 @@ class ProjectPolicyConfig(BaseModel):
     log_to_openpipe: bool = False
     use_tools: bool = True
     training_config: TrainingConfig | None = None
+    vllm_config: VLLMConfig = VLLMConfig()  # Add vLLM configuration
     custom_chat_template: str | None = None
     prompt_template: str | None = None  # The prompt template string to use for training
     verifier: str | None = None  # The verifier to use for training. A function name from verifiers.py (see slug_search/training/verifiers.py)
