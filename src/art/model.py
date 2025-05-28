@@ -113,7 +113,7 @@ class Model(BaseModel):
                 ),
             ),
         )
-        patch_openai(openai_client)
+        # patch_openai(openai_client)
         self._openai_client = openai_client
 
         return self._openai_client

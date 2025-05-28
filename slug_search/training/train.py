@@ -438,6 +438,7 @@ if __name__ == "__main__":
         debug_project_policy_config.training_config.trajectories_per_group = 8
         debug_project_policy_config.training_config.groups_per_step = 4
         debug_project_policy_config.training_config.num_epochs = 1
+        debug_project_policy_config.training_config.learning_rate = 1e-6
 
         # Configure vLLM settings for debug mode
         debug_project_policy_config.vllm_config.enforce_eager = True
