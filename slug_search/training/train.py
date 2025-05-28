@@ -321,7 +321,7 @@ async def run_training(
             f"Epoch: {epoch}, Global Step: {global_step}, Epoch Step: {epoch_step}, Batch Size: {len(batch)}"
         )
         # Run validation after each eval_steps
-        if (global_step > 0 and global_step % train_cfg.eval_steps == 0): # fmt: skip # ensure global_step > 0
+        if (global_step % train_cfg.eval_steps == 0): # fmt: skip # ensure global_step > 0
             await run_validation(model, global_step, commit=False)
         trajectory_groups = await art.gather_trajectory_groups(
             (
