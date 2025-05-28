@@ -1,25 +1,32 @@
+import argparse  # Added for command line argument parsing
+import asyncio
 import gc
+import json
+import os
+import sys
+from datetime import datetime
+from pathlib import Path
+from typing import List
+
+import polars as pl
+from dotenv import load_dotenv
+from tabulate import tabulate
+
 import art
 from art.local import LocalBackend
-import asyncio
-from dotenv import load_dotenv
-from typing import List
-import argparse  # Added for command line argument parsing
-import json
-from pathlib import Path
-import polars as pl
-from datetime import datetime  # Added for timestamping
 
-from .rollout import rollout
-from .data_types import ProjectPolicyConfig, TrainingConfig, SearchQuery
+import wandb  # Only import if needed in the function
+
+from .data_types import ProjectPolicyConfig, SearchQuery, TrainingConfig
 from .dataloaders import load_and_iterate_hf_dataset
+from .rollout import rollout
 from .search_tools import configure_search_tools
 
 load_dotenv()
 
 # Configure search tools (will be updated with command line args later)
 configure_search_tools(
-    milvus_db_path="slug_search/data/milvus_hotpotqa.db",
+    milvus_db_path="slug_search/data/milvus_hotpotqa_training.db",
     embedding_model_name="BAAI/bge-large-en-v1.5",
     embedder_api_base="http://localhost:40002/v1",
     embedder_api_key_env_var="EMBEDDER_API_KEY",
@@ -39,7 +46,7 @@ training_config = TrainingConfig(
 project_policy_config = ProjectPolicyConfig(
     base_model=BASE_MODEL_NAME,
     max_tool_calls=5,
-    max_tokens=1200,
+    max_tokens=4096,
     log_to_openpipe=False,
     use_tools=True,
     training_config=training_config,
@@ -68,6 +75,9 @@ CHAT_TEMPLATE_PATH = Path(__file__).parent / "chat_templates.json"
 with open(CHAT_TEMPLATE_PATH, "r") as f:
     chat_templates = json.load(f)
 
+# Global dict for wandb runs
+_wandb_runs = {}
+
 
 def get_prompt_template(key: str) -> str:
     if key not in prompt_templates:
@@ -75,6 +85,99 @@ def get_prompt_template(key: str) -> str:
             f"Prompt template key '{key}' not found in prompts.json. Available keys: {list(prompt_templates.keys())}"
         )
     return prompt_templates[key]
+
+
+def log_metrics_from_trajectory_groups(
+    trajectory_groups, project_name, model_name, global_step, split="val"
+):
+    """
+    Logs metrics from trajectory groups to a local file and optionally to wandb if WANDB_API_KEY_NO_ART is set.
+    Args:
+        trajectory_groups (list of lists): List of TrajectoryGroup (each a list of trajectories).
+        project_name (str): Project name.
+        model_name (str): Model name.
+        global_step (int): Global step.
+        split (str): 'train' or 'validation'.
+    """
+    all_metrics = {"reward": [], "exception_rate": []}
+    n_trajectories = 0
+    for group in trajectory_groups:
+        for t in group:
+            n_trajectories += 1
+            if isinstance(t, BaseException):
+                all_metrics["exception_rate"].append(1)
+                continue
+            else:
+                all_metrics["exception_rate"].append(0)
+            # Add reward metric
+            if hasattr(t, "reward") and t.reward is not None:
+                all_metrics["reward"].append(t.reward)
+            # Collect other custom metrics
+            if hasattr(t, "metrics") and t.metrics:
+                for metric, value in t.metrics.items():
+                    if metric not in all_metrics:
+                        all_metrics[metric] = []
+                    all_metrics[metric].append(float(value))
+    # Calculate averages for all metrics
+    averages = {}
+    for metric, values in all_metrics.items():
+        if values:
+            averages[metric] = sum(values) / len(values)
+
+    # Calculate reward std dev within groups
+    def reward_std_dev(groups):
+        import math
+
+        rewards = []
+        for group in groups:
+            group_rewards = [
+                t.reward
+                for t in group
+                if hasattr(t, "reward")
+                and t.reward is not None
+                and not isinstance(t, BaseException)
+            ]
+            if group_rewards:
+                mean = sum(group_rewards) / len(group_rewards)
+                var = sum((r - mean) ** 2 for r in group_rewards) / len(group_rewards)
+                rewards.append(math.sqrt(var))
+        if rewards:
+            return sum(rewards) / len(rewards)
+        return 0.0
+
+    averages["reward_std_dev"] = reward_std_dev(trajectory_groups)
+    averages["n_trajectories"] = n_trajectories
+    # Local log file with split in name
+    log_dir = Path("validation_logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file_path = log_dir / f"{project_name}-{model_name}-{split}.log"
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    metrics_table = tabulate(
+        averages.items(), headers=["Metric", "Value"], tablefmt="github"
+    )
+    log_entry = f"Timestamp: {timestamp}, Global Step: {global_step}, Split: {split}\nMetrics:\n{metrics_table}\n---\n"
+    with open(log_file_path, "a") as f:
+        f.write(log_entry)
+    print(f"{split.capitalize()} metrics logged to {log_file_path}")
+    # Optionally log to wandb if WANDB_API_KEY_NO_ART is set
+    wandb_api_key = os.environ.get("WANDB_API_KEY_NO_ART")
+    if wandb_api_key:
+        import wandb
+
+        global _wandb_runs
+        run = _wandb_runs.get(model_name)
+        if run is None or getattr(run, "_is_finished", False):
+            run = wandb.init(
+                project=project_name,
+                name=model_name,
+                id=model_name,
+                resume="allow",
+            )
+            _wandb_runs[model_name] = run
+            print(f"Wandb run initialized! You can view it at {run.url}")
+        # Namespace metrics
+        namespaced_metrics = {f"{split}/{k}": v for k, v in averages.items()}
+        run.log(namespaced_metrics, step=global_step)
 
 
 # run a validation step between training epochs/steps.
@@ -109,65 +212,35 @@ async def run_validation(model: art.TrainableModel, global_step: int):
         print("No validation scenarios found. Skipping validation.")
         return
 
-    val_trajectories = await art.gather_trajectories(
-        (rollout(model, scenario) for scenario in all_val_scenarios),
+    # Gather trajectory groups for validation, as in training
+    trajectory_groups = await art.gather_trajectory_groups(
+        (
+            art.TrajectoryGroup(
+                (
+                    rollout(model, scenario)
+                    for _ in range(train_cfg.trajectories_per_group)
+                )
+            )
+            for scenario in all_val_scenarios
+        ),
         pbar_desc=f"Validation for {model.name}",
-        max_exceptions=config.max_val_samples,  # Allow exceptions for all scenarios
     )
 
-    valid_trajectories = [t for t in val_trajectories if isinstance(t, art.Trajectory)]
-
-    if not valid_trajectories:
+    # Filter out empty groups
+    valid_trajectory_groups = [g for g in trajectory_groups if g]
+    if not valid_trajectory_groups:
         print(
-            "No valid trajectories generated during validation. Skipping metrics calculation."
+            "No valid trajectory groups generated during validation. Skipping metrics calculation."
         )
         return
 
-    if getattr(model, "_backend", None) is not None and hasattr(model, "log"):
-        await model.log(valid_trajectories)
-
-    metrics_list = []
-    for t in valid_trajectories:
-        metric_data = {}
-        if getattr(t, "metrics", None):
-            metric_data.update(t.metrics)
-        if getattr(t, "reward", None) is not None:
-            metric_data["reward"] = t.reward
-        if metric_data:
-            metrics_list.append(metric_data)
-
-    if not metrics_list:
-        print(
-            "No metrics or rewards found in valid trajectories. Skipping metrics calculation."
-        )
-        return
-
-    metrics_df = pl.DataFrame(metrics_list)
-
-    avg_metrics = metrics_df.select(
-        [
-            pl.mean(c).alias(c)
-            for c in metrics_df.columns
-            if metrics_df[c].dtype != pl.Null
-        ]
-    ).with_columns(pl.lit(len(valid_trajectories)).alias("n_trajectories"))
-
-    # Log metrics to file
-    project_name = model.project
-    model_name = model.name
-    log_dir = Path("validation_logs")
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_file_path = log_dir / f"{project_name}-{model_name}.log"
-
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_entry = f"Timestamp: {timestamp}, Global Step: {global_step}\nMetrics:\n{avg_metrics.to_pandas().to_string()}\n---\n"
-
-    with open(log_file_path, "a") as f:
-        f.write(log_entry)
-
-    print(f"Validation metrics logged to {log_file_path}")
-
-    return avg_metrics
+    log_metrics_from_trajectory_groups(
+        valid_trajectory_groups,
+        model.project,
+        model.name,
+        global_step,
+        split="validation",
+    )
 
 
 # The model/LoRA is saved at .art/project_name/models/model_name
@@ -235,10 +308,7 @@ async def run_training(
         )
         # Run validation after each eval_steps
         if (global_step > 0 and global_step % train_cfg.eval_steps == 0): # fmt: skip # ensure global_step > 0
-            validation_results = await run_validation(model, global_step)
-            if validation_results is not None:
-                print("Validation Metrics from run_validation return:")
-                print(validation_results)
+            await run_validation(model, global_step)
         trajectory_groups = await art.gather_trajectory_groups(
             (
                 art.TrajectoryGroup(
@@ -258,6 +328,11 @@ async def run_training(
             )
             continue
 
+        # Log metrics using the new function
+        log_metrics_from_trajectory_groups(
+            trajectory_groups, model.project, model.name, global_step, split="train"
+        )
+
         await model.train(
             trajectory_groups,
             config=art.TrainConfig(learning_rate=train_cfg.learning_rate),
@@ -265,11 +340,9 @@ async def run_training(
 
     # Run validation after training
     if (global_step > 0 and global_step % train_cfg.eval_steps == 0): # fmt: skip # ensure global_step > 0
-        validation_results = await run_validation(model, global_step)
-        if validation_results is not None:
-            print("Validation Metrics from run_validation return:")
-            print(validation_results)
+        await run_validation(model, global_step)
 
+    model._backend.close()
     print("Training finished.")
 
 
@@ -323,7 +396,7 @@ if __name__ == "__main__":
 
     # Reconfigure search tools with command line arguments
     configure_search_tools(
-        milvus_db_path="slug_search/data/milvus_hotpotqa.db",
+        milvus_db_path="slug_search/data/milvus_hotpotqa_training.db",
         embedding_model_name="BAAI/bge-large-en-v1.5",
         embedder_api_base="http://localhost:40002/v1",
         embedder_api_key_env_var="EMBEDDER_API_KEY",
@@ -331,19 +404,19 @@ if __name__ == "__main__":
     )
 
     if args.debug:
-        model_name = "slug-search-agent-debug"
+        model_name = "slug-search-agent-debug-1"
         project_name = "slug_search_project_debug"
 
         # Create a deep copy of the global project_policy_config for modification
         debug_project_policy_config = project_policy_config.model_copy(deep=True)
 
         # Modify attributes for debugging
-        debug_project_policy_config.max_training_samples = 1
-        debug_project_policy_config.max_val_samples = 1
+        debug_project_policy_config.max_training_samples = 30
+        debug_project_policy_config.max_val_samples = 20
         # Also modify the nested training_config for debugging
         debug_project_policy_config.training_config.eval_steps = 1
-        debug_project_policy_config.training_config.trajectories_per_group = 1
-        debug_project_policy_config.training_config.groups_per_step = 1
+        debug_project_policy_config.training_config.trajectories_per_group = 16
+        debug_project_policy_config.training_config.groups_per_step = 4
         debug_project_policy_config.training_config.num_epochs = 1
 
         # Configure vLLM settings for debug mode
@@ -359,6 +432,7 @@ if __name__ == "__main__":
             f"gpu_memory_utilization={debug_project_policy_config.vllm_config.gpu_memory_utilization}"
         )
         asyncio.run(run_training(model_name, project_name, debug_project_policy_config))
+        print("Debug training finished.")
     else:
         model_name = "slug-search-agent-001"
         project_name = "slug_search_project"
@@ -367,6 +441,8 @@ if __name__ == "__main__":
             f"gpu_memory_utilization={project_policy_config.vllm_config.gpu_memory_utilization}"
         )
         asyncio.run(run_training(model_name, project_name, project_policy_config))
+        print("Production training finished.")
 
     # garbage collection
     gc.collect()
+    sys.exit(0)  # Force exit

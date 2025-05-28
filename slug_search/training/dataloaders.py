@@ -1,9 +1,11 @@
+import json
 import math
 import random
-import json
-from typing import List, Generator, Tuple
+from typing import Generator, List, Tuple
+
+from datasets import Dataset, load_dataset
 from tqdm.auto import tqdm
-from datasets import load_dataset, Dataset
+
 from .data_types import SearchQuery
 
 

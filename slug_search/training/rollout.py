@@ -1,15 +1,18 @@
-from dataclasses import dataclass, asdict
-from datetime import datetime
-import art
-from slug_search.training.data_types import SearchQuery, ProjectPolicyConfig
-from art import Trajectory
 import asyncio
-from tenacity import retry, stop_after_attempt, wait_exponential
-from openai import OpenAI
-from slug_search.training.search_tools import search_documents, return_final_answer
-from slug_search.training import verifiers
-from langchain_core.utils.function_calling import convert_to_openai_tool
 import importlib
+import json
+from dataclasses import asdict, dataclass
+from datetime import datetime
+
+from langchain_core.utils.function_calling import convert_to_openai_tool
+from openai import OpenAI
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+import art
+from art import Trajectory
+from slug_search.training import verifiers
+from slug_search.training.data_types import ProjectPolicyConfig, SearchQuery
+from slug_search.training.search_tools import return_final_answer, search_documents
 
 
 @dataclass
@@ -61,8 +64,6 @@ async def rollout(
     model: art.TrainableModel,
     scenario: SearchQuery,
 ) -> Trajectory:
-    import json
-
     rubric = SearchRubric()
     traj = Trajectory(
         messages_and_choices=[],
@@ -95,21 +96,26 @@ async def rollout(
         }
         if getattr(model, "config", None) and getattr(model.config, "custom_chat_template", None): # fmt: skip
             extra_body["chat_template"] = model.config.custom_chat_template
-        llm_response = await client.chat.completions.create(
-            model=model_name,
-            messages=traj.messages(),
-            # max_tokens=1000 - rubric.completion_tokens,
-            tools=tools,
-            tool_choice="auto",
-            extra_body=extra_body,
-        )
+        try:
+            llm_response = await client.chat.completions.create(
+                model=model_name,
+                messages=traj.messages(),
+                # max_tokens=1000 - rubric.completion_tokens,
+                tools=tools,
+                tool_choice="auto",
+                extra_body=extra_body,
+            )
+        except Exception as e:
+            llm_response = None
+            break
         rubric.prompt_tokens += llm_response.usage.prompt_tokens  # type: ignore
         rubric.completion_tokens += llm_response.usage.completion_tokens  # type: ignore
 
-        choice = llm_response.choices[0]  # type: ignore
-        traj.messages_and_choices.append(choice)  # type: ignore
+        choice = llm_response.choices[0] if llm_response else None  # type: ignore
+        if choice:
+            traj.messages_and_choices.append(choice)  # type: ignore
 
-        tool_calls = getattr(choice.message, "tool_calls", None)
+        tool_calls = getattr(choice.message, "tool_calls", None) if choice else None
         if not tool_calls:
             rubric.has_answer = False
             break
@@ -119,11 +125,17 @@ async def rollout(
             tool_args_str = tool_call.function.arguments
             tool_id = getattr(tool_call, "id", None)
             rubric.num_tool_calls += 1
+
+            # Early check for empty arguments
+            if not tool_args_str or not tool_args_str.strip():
+                rubric.has_answer = False
+                break
         except Exception as e:
             print(f"Error parsing tool call: {e}")
             break
 
         if tool_name == "search_documents":
+            # At this point, tool_args_str is guaranteed to be non-empty and non-whitespace
             try:
                 tool_args = json.loads(tool_args_str)
                 tool_result = await get_tool_result(tool_name, tool_args)
