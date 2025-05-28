@@ -32,7 +32,7 @@ configure_search_tools(
     embedder_api_key_env_var="EMBEDDER_API_KEY",
 )
 
-BASE_MODEL_NAME = "unsloth/Qwen3-0.6B"  # Define base model name as a constant
+BASE_MODEL_NAME = "unsloth/Qwen3-4B"  # Define base model name as a constant
 
 # Global configurations
 training_config = TrainingConfig(
@@ -88,7 +88,13 @@ def get_prompt_template(key: str) -> str:
 
 
 def log_metrics_from_trajectory_groups(
-    trajectory_groups, project_name, model_name, global_step, split="val"
+    trajectory_groups,
+    project_name,
+    model_name,
+    global_step,
+    split="val",
+    config=None,
+    commit=False,
 ):
     """
     Logs metrics from trajectory groups to a local file and optionally to wandb if WANDB_API_KEY_NO_ART is set.
@@ -98,7 +104,10 @@ def log_metrics_from_trajectory_groups(
         model_name (str): Model name.
         global_step (int): Global step.
         split (str): 'train' or 'validation'.
+        config (dict): Project policy configuration.
+        commit (bool): Whether to commit the metrics to wandb.
     """
+    assert split in {"train", "val"}
     all_metrics = {"reward": [], "exception_rate": []}
     n_trajectories = 0
     for group in trajectory_groups:
@@ -153,7 +162,7 @@ def log_metrics_from_trajectory_groups(
     log_file_path = log_dir / f"{project_name}-{model_name}-{split}.log"
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     metrics_table = tabulate(
-        averages.items(), headers=["Metric", "Value"], tablefmt="github"
+        [list(averages.values())], headers=list(averages.keys()), tablefmt="github"
     )
     log_entry = f"Timestamp: {timestamp}, Global Step: {global_step}, Split: {split}\nMetrics:\n{metrics_table}\n---\n"
     with open(log_file_path, "a") as f:
@@ -172,16 +181,19 @@ def log_metrics_from_trajectory_groups(
                 name=model_name,
                 id=model_name,
                 resume="allow",
+                config=config,
             )
             _wandb_runs[model_name] = run
             print(f"Wandb run initialized! You can view it at {run.url}")
         # Namespace metrics
         namespaced_metrics = {f"{split}/{k}": v for k, v in averages.items()}
-        run.log(namespaced_metrics, step=global_step)
+        run.log(namespaced_metrics, step=global_step, commit=commit)
+        if split == "val" and commit:
+            run.finish()
 
 
 # run a validation step between training epochs/steps.
-async def run_validation(model: art.TrainableModel, global_step: int):
+async def run_validation(model: art.TrainableModel, global_step: int, commit=False):
     assert hasattr(model, "config")
     config = model.config
     train_cfg = config.training_config
@@ -239,7 +251,9 @@ async def run_validation(model: art.TrainableModel, global_step: int):
         model.project,
         model.name,
         global_step,
-        split="validation",
+        split="val",
+        config=model.config.model_dump(),
+        commit=commit,
     )
 
 
@@ -308,7 +322,7 @@ async def run_training(
         )
         # Run validation after each eval_steps
         if (global_step > 0 and global_step % train_cfg.eval_steps == 0): # fmt: skip # ensure global_step > 0
-            await run_validation(model, global_step)
+            await run_validation(model, global_step, commit=False)
         trajectory_groups = await art.gather_trajectory_groups(
             (
                 art.TrajectoryGroup(
@@ -319,7 +333,7 @@ async def run_training(
                 )
                 for scenario in batch
             ),
-            pbar_desc=f"Gathering trajectories for step {global_step}",
+            pbar_desc=f"Gathering trajectories for Global Step {global_step}",
         )
 
         if not trajectory_groups:
@@ -330,7 +344,13 @@ async def run_training(
 
         # Log metrics using the new function
         log_metrics_from_trajectory_groups(
-            trajectory_groups, model.project, model.name, global_step, split="train"
+            trajectory_groups,
+            model.project,
+            model.name,
+            global_step,
+            split="train",
+            config=model.config.model_dump(),
+            commit=True,
         )
 
         await model.train(
@@ -340,7 +360,7 @@ async def run_training(
 
     # Run validation after training
     if (global_step > 0 and global_step % train_cfg.eval_steps == 0): # fmt: skip # ensure global_step > 0
-        await run_validation(model, global_step)
+        await run_validation(model, global_step + 1, commit=True)
 
     model._backend.close()
     print("Training finished.")
@@ -404,7 +424,7 @@ if __name__ == "__main__":
     )
 
     if args.debug:
-        model_name = "slug-search-agent-debug-1"
+        model_name = "slug-search-agent-debug-3"
         project_name = "slug_search_project_debug"
 
         # Create a deep copy of the global project_policy_config for modification
@@ -412,16 +432,16 @@ if __name__ == "__main__":
 
         # Modify attributes for debugging
         debug_project_policy_config.max_training_samples = 30
-        debug_project_policy_config.max_val_samples = 20
+        debug_project_policy_config.max_val_samples = 10
         # Also modify the nested training_config for debugging
-        debug_project_policy_config.training_config.eval_steps = 1
-        debug_project_policy_config.training_config.trajectories_per_group = 16
+        debug_project_policy_config.training_config.eval_steps = 2
+        debug_project_policy_config.training_config.trajectories_per_group = 8
         debug_project_policy_config.training_config.groups_per_step = 4
         debug_project_policy_config.training_config.num_epochs = 1
 
         # Configure vLLM settings for debug mode
         debug_project_policy_config.vllm_config.enforce_eager = True
-        debug_project_policy_config.vllm_config.gpu_memory_utilization = 0.8
+        debug_project_policy_config.vllm_config.gpu_memory_utilization = 0.95
         debug_project_policy_config.vllm_config.max_model_len = (
             4096  # Smaller context for faster debugging
         )

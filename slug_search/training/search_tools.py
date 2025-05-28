@@ -80,10 +80,12 @@ async def _search_relevant_documents(search_query: str, top_k: int) -> List[str]
 async def search_documents(search_query: str) -> List[str]:
     """
     Retrieves relevant document contents from a Vector Database using vector similarity search.
+
     Args:
-        search_query (str): The search query to be used to retrieve relevant documents.
+        search_query: (str) The search query to be used to retrieve relevant documents.
+
     Returns:
-        List[str]: A list of document contents (strings).
+        (List[str]) A list of document contents as strings.
     """
     return await _search_relevant_documents(search_query, top_k=_default_top_k)
 
@@ -94,10 +96,10 @@ async def return_final_answer(answer: str) -> str:
     It should be called with the answer passed as an argument. If you cannot find the answer, you should return "I don't know".
 
     Args:
-        answer (str): the answer to the user's query. If you cannot find the answer, you should return "I don't know".
+        answer: (str) The answer to the user's query. If you cannot find the answer, you should return "I don't know".
 
     Returns:
-        (str): the final answer to the user's query
+       (str) The final answer to the user's query.
     """
     ...
 
