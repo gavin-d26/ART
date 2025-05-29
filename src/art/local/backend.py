@@ -147,6 +147,8 @@ class LocalBackend(Backend):
             self._tokenizers[model.base_model] = AutoTokenizer.from_pretrained(
                 model.base_model
             )
+            if getattr(model.config, "custom_chat_template", None):
+                self._tokenizers[model.base_model].chat_template = model.config.custom_chat_template.strip() # fmt: skip
         tokenizer = self._tokenizers[model.base_model]
         tokenized_results = list(
             tokenize_trajectory_groups(
