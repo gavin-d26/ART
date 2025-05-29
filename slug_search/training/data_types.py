@@ -20,7 +20,7 @@ class TrainingConfig(BaseModel):
 
 class ProjectPolicyConfig(BaseModel):
     base_model: str  # No default value; must be provided
-    max_tool_calls: int = 10
+    max_tool_calls: int = 5
     max_tokens: int = 2048
     log_to_openpipe: bool = False
     use_tools: bool = True
