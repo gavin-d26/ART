@@ -8,6 +8,7 @@ class VLLMConfig(BaseModel):
     enforce_eager: bool = False
     gpu_memory_utilization: float = 0.95
     max_model_len: Optional[int] = None
+    max_num_seqs: Optional[int] = None
 
 
 class TrainingConfig(BaseModel):
@@ -16,10 +17,14 @@ class TrainingConfig(BaseModel):
     learning_rate: float = 1.2e-5
     eval_steps: int = 30
     num_epochs: int = 1  # Number of times to iterate over the dataset
+    beta: float = 0.04
 
 
 class ProjectPolicyConfig(BaseModel):
     base_model: str  # No default value; must be provided
+    # TODO: add sampling configs
+    temperature: float = 1.0
+    top_p: float = 1.0 # TODO: check R1-searcher
     max_tool_calls: int = 5
     max_tokens: int = 2048
     log_to_openpipe: bool = False

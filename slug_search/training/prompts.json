@@ -1,3 +1,4 @@
 {
-    "default_query_prompt": "Answer the following query by using the search tool to find the answer. When returning the answer, use the 'return_final_answer' tool. You may use the search tool multiple times if needed.\nquery: {{query}}"
+    "default_query_prompt": "Answer the following query by using the search tool to find the answer. When returning the answer, use the 'return_final_answer' tool. You may use the search tool multiple times if needed.\nquery: {{query}}",
+    "default_query_prompt_2": "Answer the following query by using the search tool to find the answer. When returning the answer, use the 'return_final_answer' tool. The query might require multiple distinct facts to answer. Be sure to use the search tool two or more times with different search queries to find the answer. The answer is guaranteed to be searchable with the right query. But, keep in mind that you can only use the search tool once per turn. You can only call the 'return_final_answer' tool once.\nquery: {{query}}"
 }

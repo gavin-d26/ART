@@ -67,14 +67,17 @@ async def _search_relevant_documents(search_query: str, top_k: int) -> List[str]
     try:
         pipeline = get_or_initialize_embedder_retriever_pipeline(top_k=top_k)
         result = await pipeline.run_pipeline(search_query)
-        return [
-            str(doc.content)
-            for doc in result.get("documents", [])
-            if getattr(doc, "content", None) is not None
-        ]
-    except Exception:
+        result_str = "\n".join(
+            [
+                f"{i+1}. {doc.content}"
+                for i, doc in enumerate(result.get("documents", []))
+            ]
+        )
+        result_str = f"<search_query>\n{search_query}\n</search_query>\n\n<search_results>\n{result_str}\n</search_results>"
+        return result_str
+    except Exception as e:
         # Consider logging the exception here if more robust error handling is needed
-        return []
+        return f"Error: {e}"
 
 
 async def search_documents(search_query: str) -> List[str]:
@@ -85,7 +88,7 @@ async def search_documents(search_query: str) -> List[str]:
         search_query: (str) The search query to be used to retrieve relevant documents.
 
     Returns:
-        (List[str]) A list of document contents as strings.
+        (str) A list of document contents as strings in a stringified format.
     """
     return await _search_relevant_documents(search_query, top_k=_default_top_k)
 

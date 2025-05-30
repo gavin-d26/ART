@@ -8,7 +8,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
-import polars as pl
 from dotenv import load_dotenv
 from tabulate import tabulate
 
@@ -41,16 +40,19 @@ training_config = TrainingConfig(
     learning_rate=1e-5,
     eval_steps=10,
     num_epochs=1,
+    beta=0.001,
 )
 
 project_policy_config = ProjectPolicyConfig(
     base_model=BASE_MODEL_NAME,
+    temperature=1.0,
+    top_p=1.0,
     max_tool_calls=5,
     max_tokens=4096,
     log_to_openpipe=False,
     use_tools=True,
     training_config=training_config,
-    prompt_template="default_query_prompt",
+    prompt_template="default_query_prompt_2",
     verifier="check_answer_correctness_multi_gt",
     # Training dataset
     training_dataset_path="lucadiliello/hotpotqa",
@@ -278,6 +280,8 @@ async def run_training(
             engine_args["gpu_memory_utilization"] = vllm_dict["gpu_memory_utilization"]
         if vllm_dict.get("max_model_len") is not None:
             engine_args["max_model_len"] = vllm_dict["max_model_len"]
+        if vllm_dict.get("max_num_seqs") is not None:
+            engine_args["max_num_seqs"] = vllm_dict["max_num_seqs"]
 
         if engine_args:
             internal_config = art.dev.InternalModelConfig(engine_args=engine_args)

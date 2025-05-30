@@ -24,6 +24,7 @@ class SearchRubric:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     ran_out_of_tool_calls: bool = False
+    ran_out_of_tokens: bool = False
 
     def to_metrics(self) -> dict[str, float | int]:
         return {k: int(v) for k, v in asdict(self).items()}
@@ -47,17 +48,60 @@ async def get_tool_result(tool_name: str, tool_args: dict) -> str:
 def calculate_reward(
     policy_config: ProjectPolicyConfig, rubric: SearchRubric, traj: Trajectory
 ) -> float:
-    # As an ablation, let's try the simplest possible reward function: just give
-    # 1 point for a correct answer, and 0 for anything else. Otherwise, we'll do something
-    # more complex.
-    if rubric.answer_correct:
-        return 1
-    else:
-        return 0
+    # --- Start of Tunable Reward Hyperparameters ---
+    reward_for_correct_answer: float = 1.0
 
-    traj.logs.append(f"Rubric: {rubric}")
-    traj.logs.append("Rubric not handled properly")
-    raise ValueError("Rubric is not handled properly")
+    # To reduce reward sparsity, add a bonus for each successful tool call
+    bonus_per_successful_tool_call: float = 0.05
+
+    # Penalty for each failed tool call
+    # The original function implicitly applied -1.0 for each failed tool call
+    # by using `total_reward += rubric.num_successful_tool_calls - rubric.num_tool_calls`.
+    # Making it explicit allows for better tuning.
+    penalty_per_failed_tool_call: float = (
+        -0.2
+    )  # Example: less severe than original implicit -1
+
+    # Penalty factor if the agent answers incorrectly without using all available tool calls
+    # Original factor was -0.5; adjusting this can change exploration/exploitation balance.
+    penalty_factor_early_incorrect_stop: float = -0.25
+
+    # Penalties for resource exhaustion
+    penalty_ran_out_of_tool_calls: float = -1.0
+    penalty_ran_out_of_tokens: float = -1.0
+    # --- End of Tunable Reward Hyperparameters ---
+
+    total_reward = 0.0
+
+    if rubric.answer_correct:
+        total_reward += reward_for_correct_answer
+    # No direct penalty for just being incorrect, but the agent misses the +1.0 reward.
+    # Penalties below will further shape behavior for incorrect trajectories.
+
+    # Add bonus for successful tool calls (this is key for reducing sparsity)
+    total_reward += rubric.num_successful_tool_calls * bonus_per_successful_tool_call
+
+    # Penalize failed tool calls
+    # This replaces the original `total_reward += rubric.num_successful_tool_calls - rubric.num_tool_calls`
+    num_failed_tool_calls = rubric.num_tool_calls - rubric.num_successful_tool_calls
+    total_reward += num_failed_tool_calls * penalty_per_failed_tool_call
+
+    # Penalty for stopping early with an incorrect answer when resources were still available
+    if (
+        not rubric.answer_correct
+        and rubric.num_tool_calls < policy_config.max_tool_calls
+        and not rubric.ran_out_of_tool_calls
+        and not rubric.ran_out_of_tokens
+    ):
+        unused_tool_calls = (policy_config.max_tool_calls - 1) - rubric.num_tool_calls
+        total_reward += unused_tool_calls * penalty_factor_early_incorrect_stop
+
+    if rubric.ran_out_of_tool_calls:
+        total_reward += penalty_ran_out_of_tool_calls
+    if rubric.ran_out_of_tokens:
+        total_reward += penalty_ran_out_of_tokens
+
+    return total_reward
 
 
 async def rollout(
@@ -86,8 +130,10 @@ async def rollout(
 
     while True:
         if rubric.num_tool_calls > model.config.max_tool_calls:
+            rubric.ran_out_of_tool_calls = True
             break
         if rubric.completion_tokens > model.config.max_tokens:
+            rubric.ran_out_of_tokens = True
             break
 
         extra_body = {
@@ -100,6 +146,8 @@ async def rollout(
             llm_response = await client.chat.completions.create(
                 model=model_name,
                 messages=traj.messages(),
+                temperature=model.config.temperature,
+                top_p=model.config.top_p,
                 # max_tokens=1000 - rubric.completion_tokens,
                 tools=tools,
                 tool_choice="auto",

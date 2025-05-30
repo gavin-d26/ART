@@ -83,6 +83,7 @@ def get_compute_loss_fn(trainer: "GRPOTrainer") -> Callable[..., torch.Tensor]:
             seq_len % chunk_size == 0
         ), f"Sequence length ({seq_len}) must be evenly divisible by chunk size ({chunk_size})"
         os.environ["UNSLOTH_RETURN_HIDDEN_STATES"] = "1"
+        # TODO: What is the difference between new_logprobs and old_logprobs?
         new_logprobs = calculate_logprobs(
             autocast_dtype,
             trainer,
@@ -143,7 +144,7 @@ def get_compute_loss_fn(trainer: "GRPOTrainer") -> Callable[..., torch.Tensor]:
         kl_div = kl_div * weights * assistant_mask
         mean_policy_loss = policy_loss.sum() / (assistant_mask.sum() + 1e-6)
         mean_kl = kl_div.sum() / (assistant_mask.sum() + 1e-6)
-
+        trainer._metrics["prob_ratio"].append(prob_ratio.mean().item())
         trainer._metrics["learning_rate"].append(config.learning_rate)
         trainer._metrics["policy_loss"].append(mean_policy_loss.item())
         if config.beta > 0.0:
