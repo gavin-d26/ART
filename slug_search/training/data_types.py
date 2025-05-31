@@ -32,6 +32,7 @@ class ProjectPolicyConfig(BaseModel):
     training_config: TrainingConfig | None = None
     vllm_config: VLLMConfig = VLLMConfig()  # Add vLLM configuration
     custom_chat_template: str | None = None
+    system_prompt: str | None = None
     prompt_template: str | None = None  # The prompt template string to use for training
     verifier: str | None = None  # The verifier to use for training. A function name from verifiers.py (see slug_search/training/verifiers.py)
     # Training dataset specific parameters

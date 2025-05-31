@@ -116,10 +116,14 @@ async def rollout(
     )
     # assert isinstance(model.config, ProjectPolicyConfig)
 
-    traj.messages_and_choices = [
-        {"role": "user", "content": scenario.query},
-        # {"role": "assistant", "content": "<think>"},
-    ]
+    traj.messages_and_choices = []
+
+    if model.config.system_prompt:
+        traj.messages_and_choices.append(
+            {"role": "system", "content": model.config.system_prompt}
+        )
+
+    traj.messages_and_choices.append({"role": "user", "content": scenario.query})
 
     llm_response = None
     final_answer = None

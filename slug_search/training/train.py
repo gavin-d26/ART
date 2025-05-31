@@ -31,7 +31,7 @@ configure_search_tools(
     embedder_api_key_env_var="EMBEDDER_API_KEY",
 )
 
-BASE_MODEL_NAME = "unsloth/Qwen3-4B"  # Define base model name as a constant
+BASE_MODEL_NAME = "unsloth/Qwen2.5-3B-instruct"  # Define base model name as a constant
 
 # Global configurations
 training_config = TrainingConfig(
@@ -53,6 +53,7 @@ project_policy_config = ProjectPolicyConfig(
     use_tools=True,
     training_config=training_config,
     prompt_template="default_query_prompt_2",
+    system_prompt="qwen_2.5_3b_instruct_system_prompt",
     verifier="check_answer_correctness_multi_gt",
     # Training dataset
     training_dataset_path="lucadiliello/hotpotqa",
@@ -199,10 +200,6 @@ async def run_validation(model: art.TrainableModel, global_step: int, commit=Fal
     assert hasattr(model, "config")
     config = model.config
     train_cfg = config.training_config
-    prompt_template_key = config.prompt_template
-    prompt_template = None
-    if prompt_template_key:
-        prompt_template = get_prompt_template(prompt_template_key)
 
     print(f"Running validation for model: {model.name}")
 
@@ -212,7 +209,7 @@ async def run_validation(model: art.TrainableModel, global_step: int, commit=Fal
         dataset_split=config.val_dataset_split,
         prompt_column=config.val_prompt_column,
         answer_column=config.val_answer_column,
-        prompt_template=prompt_template,
+        prompt_template=config.prompt_template,
         batch_size=config.max_val_samples,  # Process all val samples in one batch
         num_epochs=1,  # Single pass
         max_samples=config.max_val_samples,
@@ -268,6 +265,12 @@ async def run_training(
 ):
     # Convert vLLM config to internal config
     internal_config = None
+    current_project_policy_config.system_prompt = get_prompt_template(
+        current_project_policy_config.system_prompt
+    )
+    current_project_policy_config.prompt_template = get_prompt_template(
+        current_project_policy_config.prompt_template
+    )
     if current_project_policy_config.vllm_config:
         vllm_dict = current_project_policy_config.vllm_config.model_dump()
         # Only include non-default values to keep config clean
@@ -304,9 +307,6 @@ async def run_training(
     config = model.config
     assert hasattr(config, "training_config") and config.training_config is not None
     train_cfg = config.training_config
-    prompt_template = config.prompt_template
-    if prompt_template is not None:
-        prompt_template = get_prompt_template(prompt_template)
 
     # Use dataloader
     train_iterator = load_and_iterate_hf_dataset(
@@ -314,7 +314,7 @@ async def run_training(
         dataset_split=config.training_dataset_split,
         prompt_column=config.training_prompt_column,
         answer_column=config.training_answer_column,
-        prompt_template=prompt_template,
+        prompt_template=config.prompt_template,
         batch_size=train_cfg.groups_per_step,
         num_epochs=train_cfg.num_epochs,
         max_samples=config.max_training_samples,
@@ -324,9 +324,12 @@ async def run_training(
         print(
             f"Epoch: {epoch}, Global Step: {global_step}, Epoch Step: {epoch_step}, Batch Size: {len(batch)}"
         )
-        # Run validation after each eval_steps
-        if (global_step % train_cfg.eval_steps == 0): # fmt: skip # ensure global_step > 0
+
+        # Run validation every eval_steps steps
+        if train_cfg.eval_steps > 0 and (global_step % train_cfg.eval_steps == 0): # fmt: skip # ensure global_step > 0
             await run_validation(model, global_step, commit=False)
+
+        # Gather trajectories for training
         trajectory_groups = await art.gather_trajectory_groups(
             (
                 art.TrajectoryGroup(
@@ -382,8 +385,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--prompt_template",
         type=str,
-        default="default_query_prompt",
+        default="default_query_prompt_2",
         help=f"Prompt template key to use from prompts.json (default: 'default_query_prompt').",
+    )
+    parser.add_argument(
+        "--system_prompt",
+        type=str,
+        default="qwen_2.5_3b_instruct_system_prompt",
+        help=f"System prompt to use for training.",
     )
     parser.add_argument(
         "--verifier",
@@ -407,6 +416,9 @@ if __name__ == "__main__":
 
     if args.prompt_template:
         project_policy_config.prompt_template = args.prompt_template
+
+    if args.system_prompt:
+        project_policy_config.system_prompt = args.system_prompt
 
     if args.verifier:
         project_policy_config.verifier = args.verifier
