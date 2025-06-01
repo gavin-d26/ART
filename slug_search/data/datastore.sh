@@ -18,7 +18,7 @@ PROJECT_ROOT="$(pwd)"
 DATASET_NAME="lucadiliello/hotpotqa"
 DATASET_DISPLAY_NAME="HotPotQA"
 TEXT_COLUMN="context"
-MILVUS_DB_PATH="slug_search/data/milvus_hotpotqa.db"
+MILVUS_DB_PATH="slug_search/data/milvus_hotpotqa_better_chunking.db"
 
 # Model configuration
 EMBEDDING_MODEL="BAAI/bge-large-en-v1.5"

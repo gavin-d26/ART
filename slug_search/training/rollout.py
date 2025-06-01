@@ -160,8 +160,9 @@ async def rollout(
         except Exception as e:
             llm_response = None
             break
-        rubric.prompt_tokens += llm_response.usage.prompt_tokens  # type: ignore
-        rubric.completion_tokens += llm_response.usage.completion_tokens  # type: ignore
+
+        if rubric.prompt_tokens == 0:
+            rubric.prompt_tokens = llm_response.usage.prompt_tokens  # type: ignore
 
         choice = llm_response.choices[0] if llm_response else None  # type: ignore
         if choice:
@@ -231,6 +232,11 @@ async def rollout(
             )
             break
 
+    rubric.completion_tokens = (
+        llm_response.usage.prompt_tokens
+        + llm_response.usage.completion_tokens
+        - rubric.prompt_tokens
+    )  # completion tokens + tool result tokens
     reward = calculate_reward(getattr(model, "config", None), rubric, traj)
     traj.reward = reward
     traj.metrics = rubric.to_metrics()

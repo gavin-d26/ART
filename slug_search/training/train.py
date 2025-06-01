@@ -25,7 +25,7 @@ load_dotenv()
 
 # Configure search tools (will be updated with command line args later)
 configure_search_tools(
-    milvus_db_path="slug_search/data/milvus_hotpotqa_training.db",
+    milvus_db_path="slug_search/data/milvus_hotpotqa_better_chunking_training.db",
     embedding_model_name="BAAI/bge-large-en-v1.5",
     embedder_api_base="http://localhost:40002/v1",
     embedder_api_key_env_var="EMBEDDER_API_KEY",
@@ -432,7 +432,7 @@ if __name__ == "__main__":
 
     # Reconfigure search tools with command line arguments
     configure_search_tools(
-        milvus_db_path="slug_search/data/milvus_hotpotqa_training.db",
+        milvus_db_path="slug_search/data/milvus_hotpotqa_better_chunking_training.db",
         embedding_model_name="BAAI/bge-large-en-v1.5",
         embedder_api_base="http://localhost:40002/v1",
         embedder_api_key_env_var="EMBEDDER_API_KEY",

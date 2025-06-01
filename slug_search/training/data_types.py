@@ -18,6 +18,7 @@ class TrainingConfig(BaseModel):
     eval_steps: int = 30
     num_epochs: int = 1  # Number of times to iterate over the dataset
     beta: float = 0.04
+    gradient_accumulation_steps: int = 1
 
 
 class ProjectPolicyConfig(BaseModel):

@@ -4,6 +4,7 @@ from datasets import load_dataset
 from haystack import Document
 from milvus_haystack.document_store import MilvusDocumentStore
 from typing import List, Dict, Any
+import math
 
 # VLLM Imports
 from vllm import LLM, EngineArgs
@@ -159,13 +160,48 @@ def load_hf_dataset_to_dataframe(
 
 
 # --- Text Preprocessing/Chunking ---
-def preprocess_and_chunk_text(text: str, chunk_size: int = 256) -> List[str]:
+def preprocess_and_chunk_text(
+    text: str, max_chunk_length: int = 256, overlap_ratio: float = 0.2
+) -> List[str]:
     """
-    Preprocesses text from a single document and optionally chunks it.
+    Creates chunks from text with a specified overlap, disregarding sentence boundaries.
+
+    Args:
+        text: Input text to chunk.
+        max_chunk_length: Maximum characters per chunk.
+        overlap_ratio: The ratio of overlap between consecutive chunks.
+                       For example, 0.1 means 10% overlap.
     """
-    if not text or not isinstance(text, str):
-        return []  # Return empty list if text is invalid
-    return [text[i : i + chunk_size] for i in range(0, len(text), chunk_size)]
+    if not text or not isinstance(text, str) or max_chunk_length <= 0:
+        return []
+
+    text = text.strip()
+    if not text:
+        return []
+
+    if overlap_ratio < 0 or overlap_ratio >= 1:
+        raise ValueError(
+            "overlap_ratio must be between 0 (inclusive) and 1 (exclusive)."
+        )
+
+    overlap_in_chars = math.floor(max_chunk_length * overlap_ratio)
+    step_size = max(1, max_chunk_length - overlap_in_chars)
+
+    chunks = []
+    text_len = len(text)
+    current_pos = 0
+    while current_pos < text_len:
+        chunk_end = min(current_pos + max_chunk_length, text_len)
+        chunks.append(text[current_pos:chunk_end])
+        if chunk_end == text_len:
+            break
+        current_pos += step_size
+
+    if len(chunks) > 1 and len(chunks[-1]) < (0.3 * max_chunk_length):
+        chunks[-2] = chunks[-2] + " " + chunks[-1]
+        chunks.pop(-1)
+
+    return chunks
 
 
 # --- Main Processing Logic ---
