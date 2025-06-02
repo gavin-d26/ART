@@ -5,6 +5,7 @@ from haystack import Document
 from milvus_haystack.document_store import MilvusDocumentStore
 from typing import List, Dict, Any
 import math
+import hashlib
 
 # VLLM Imports
 from vllm import LLM, EngineArgs
@@ -59,8 +60,13 @@ def check_if_ground_truth_retrieved(
     other_chunks = []
 
     for chunk in retrieved_chunks:
-        chunk_id = chunk.get("chunk_id", "")
-        if chunk_id.startswith(query_document_id):
+        # Try to get meta dict, fallback to top-level if not present
+        meta = chunk.get("meta")
+        if isinstance(meta, dict):
+            retrieved_original_doc_id = meta.get("original_doc_id")
+        else:
+            retrieved_original_doc_id = chunk.get("original_doc_id")
+        if retrieved_original_doc_id == query_document_id:
             ground_truth_chunks.append(chunk)
         else:
             other_chunks.append(chunk)
@@ -161,7 +167,7 @@ def load_hf_dataset_to_dataframe(
 
 # --- Text Preprocessing/Chunking ---
 def preprocess_and_chunk_text(
-    text: str, max_chunk_length: int = 256, overlap_ratio: float = 0.2
+    text: str, max_chunk_length: int = 256, overlap_ratio: float = 0.25
 ) -> List[str]:
     """
     Creates chunks from text with a specified overlap, disregarding sentence boundaries.
@@ -204,6 +210,34 @@ def preprocess_and_chunk_text(
     return chunks
 
 
+# --- Row-level Paragraph Preprocessing ---
+def row_preprocess_text_by_separator(text: str, separator: str = "[PAR]") -> list:
+    """
+    Splits a text string into paragraphs using the given separator, cleans up markers, and removes empty entries.
+    For each paragraph, if a [SEP] marker is present, only keep the text to the right of [SEP].
+    Args:
+        text: The input string containing paragraphs separated by [PAR].
+        separator: The separator string (default: '[PAR]').
+    Returns:
+        List of cleaned paragraph strings.
+    """
+    if not text or not isinstance(text, str):
+        return []
+    paragraphs = text.split(separator)[1:]
+    cleaned = []
+    for para in paragraphs:
+        # Remove [TLE] marker
+        para = para.replace("[TLE]", "").strip()
+        # If [SEP] is present, keep only the text to the right of [SEP]
+        if "[SEP]" in para:
+            para = para.split("[SEP]", 1)[1].strip()
+        else:
+            para = para.strip()
+        if para:
+            cleaned.append(para)
+    return cleaned
+
+
 # --- Main Processing Logic ---
 def create_haystack_documents(
     df: pd.DataFrame,
@@ -215,6 +249,7 @@ def create_haystack_documents(
 ) -> List[Document]:
     """
     Processes text from the DataFrame and creates Haystack Documents with unique IDs across splits.
+    Deduplicates paragraphs by content hash.
 
     Args:
         df: DataFrame containing the data
@@ -248,6 +283,7 @@ def create_haystack_documents(
     # Ensure index is 0-based and sequential for ID consistency
     df = df.reset_index(drop=True)
 
+    processed_paragraph_content_hashes = set()
     for index, row in df.iterrows():
         text_content = row[text_column]
         if not text_content or not isinstance(text_content, str):
@@ -257,24 +293,31 @@ def create_haystack_documents(
 
         original_doc_id = make_unique_doc_id(row, dataset_name, split_name, index)
 
-        chunks = preprocess_fn(text_content)
-        for i, chunk in enumerate(chunks):
-            meta_data: Dict[str, Any] = {
-                "original_doc_id": original_doc_id,
-                "split_name": split_name,
-                "dataset_name": dataset_name,
-                "derived_dataset_identifier": derived_dataset_identifier,
-                "original_index_in_split": index,
-            }
+        paragraphs = row_preprocess_text_by_separator(text_content)
+        for para in paragraphs:
+            paragraph_content_hash = hashlib.sha256(para.encode("utf-8")).hexdigest()
+            if paragraph_content_hash in processed_paragraph_content_hashes:
+                continue  # Deduplicate: only process first occurrence
+            processed_paragraph_content_hashes.add(paragraph_content_hash)
+            chunks = preprocess_fn(para)
+            for i, chunk in enumerate(chunks):
+                meta_data: Dict[str, Any] = {
+                    "original_doc_id": original_doc_id,
+                    "split_name": split_name,
+                    "dataset_name": dataset_name,
+                    "derived_dataset_identifier": derived_dataset_identifier,
+                    "original_index_in_split": index,
+                    "paragraph_content_hash": paragraph_content_hash,
+                }
 
-            for meta_col in metadata_columns:
-                if meta_col in row:
-                    meta_data[meta_col] = row[meta_col]
+                for meta_col in metadata_columns:
+                    if meta_col in row:
+                        meta_data[meta_col] = row[meta_col]
 
-            meta_data["chunk_id"] = f"{original_doc_id}_chunk_{i}"
+                meta_data["chunk_id"] = f"{paragraph_content_hash}_chunk_{i}"
 
-            doc = Document(content=chunk, meta=meta_data)
-            haystack_documents.append(doc)
+                doc = Document(content=chunk, meta=meta_data)
+                haystack_documents.append(doc)
 
     print(f"Created {len(haystack_documents)} Haystack Document objects.")
     return haystack_documents

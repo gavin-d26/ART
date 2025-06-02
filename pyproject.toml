@@ -35,6 +35,7 @@ slug = [
     "haystack-experimental>=0.9.0",
     "python-json-logger",
     "langchain-core",
+    "elasticsearch-haystack",
 ]
 
 [project.scripts]

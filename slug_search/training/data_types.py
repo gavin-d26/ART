@@ -19,6 +19,13 @@ class TrainingConfig(BaseModel):
     num_epochs: int = 1  # Number of times to iterate over the dataset
     beta: float = 0.04
     gradient_accumulation_steps: int = 1
+    weight_decay: float = 0.0
+    max_grad_norm: float = 1.0
+
+
+class PeftArgs(BaseModel):
+    r: int = 8,
+    lora_alpha: int = 16
 
 
 class ProjectPolicyConfig(BaseModel):
@@ -32,6 +39,7 @@ class ProjectPolicyConfig(BaseModel):
     use_tools: bool = True
     training_config: TrainingConfig | None = None
     vllm_config: VLLMConfig = VLLMConfig()  # Add vLLM configuration
+    peft_args: PeftArgs = PeftArgs()
     custom_chat_template: str | None = None
     system_prompt: str | None = None
     prompt_template: str | None = None  # The prompt template string to use for training

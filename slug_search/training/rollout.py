@@ -48,27 +48,31 @@ async def get_tool_result(tool_name: str, tool_args: dict) -> str:
 def calculate_reward(
     policy_config: ProjectPolicyConfig, rubric: SearchRubric, traj: Trajectory
 ) -> float:
+    # use simple reward function
+    # 1.0 for correct answer
+    # 0.0 for incorrect answer
+
     # --- Start of Tunable Reward Hyperparameters ---
     reward_for_correct_answer: float = 1.0
 
     # To reduce reward sparsity, add a bonus for each successful tool call
-    bonus_per_successful_tool_call: float = 0.05
+    bonus_per_successful_tool_call: float = 0.1
 
     # Penalty for each failed tool call
     # The original function implicitly applied -1.0 for each failed tool call
     # by using `total_reward += rubric.num_successful_tool_calls - rubric.num_tool_calls`.
     # Making it explicit allows for better tuning.
     penalty_per_failed_tool_call: float = (
-        -0.2
-    )  # Example: less severe than original implicit -1
+        0.0  # Example: less severe than original implicit -1
+    )
 
     # Penalty factor if the agent answers incorrectly without using all available tool calls
     # Original factor was -0.5; adjusting this can change exploration/exploitation balance.
-    penalty_factor_early_incorrect_stop: float = -0.25
+    penalty_factor_early_incorrect_stop: float = 0.0
 
     # Penalties for resource exhaustion
-    penalty_ran_out_of_tool_calls: float = -1.0
-    penalty_ran_out_of_tokens: float = -1.0
+    penalty_ran_out_of_tool_calls: float = 0.0
+    penalty_ran_out_of_tokens: float = 0.0
     # --- End of Tunable Reward Hyperparameters ---
 
     total_reward = 0.0
@@ -231,12 +235,14 @@ async def rollout(
                 }
             )
             break
-
-    rubric.completion_tokens = (
-        llm_response.usage.prompt_tokens
-        + llm_response.usage.completion_tokens
-        - rubric.prompt_tokens
-    )  # completion tokens + tool result tokens
+    if llm_response:
+        rubric.completion_tokens = (
+            llm_response.usage.prompt_tokens
+            + llm_response.usage.completion_tokens
+            - rubric.prompt_tokens
+        )  # completion tokens + tool result tokens
+    else:
+        rubric.completion_tokens = 0
     reward = calculate_reward(getattr(model, "config", None), rubric, traj)
     traj.reward = reward
     traj.metrics = rubric.to_metrics()

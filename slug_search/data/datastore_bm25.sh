@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# Specify which GPU to use (0, 1, 2, etc. or multiple: "0,1")
+# Specify which GPU to use (if needed, but not required for BM25)
 # export CUDA_VISIBLE_DEVICES=3
 
-# Enhanced Datastore Creation Script with Unique ID System
-# Based on Phase 1 implementation plan - Critical ID System Fix
+# Enhanced Datastore Creation Script for Elasticsearch + BM25
+# Based on Phase 1 implementation plan - BM25/Elasticsearch version
 
 # =============================================================================
 # CONFIGURATION VARIABLES
@@ -18,16 +18,17 @@ PROJECT_ROOT="$(pwd)"
 DATASET_NAME="lucadiliello/hotpotqa"
 DATASET_DISPLAY_NAME="HotPotQA"
 TEXT_COLUMN="context"
-MILVUS_DB_PATH="slug_search/data/milvus_hotpotqa_fixed.db"
 
-# Model configuration
-EMBEDDING_MODEL="BAAI/bge-large-en-v1.5"
+# Elasticsearch configuration
+ELASTICSEARCH_HOST="http://localhost:40005"
+ELASTICSEARCH_INDEX_NAME="hotpotqa_bm25_prod"
+
+# Model/Preprocessing configuration
 PREPROCESS_FUNCTION="preprocess_and_chunk_text"
-GPU_MEMORY_UTILIZATION="0.2"
 
 # Split configuration
 SPLITS=("train" "validation")
-# MAX_DOCS=1  # Uncomment to limit documents for testing
+MAX_DOCS=1  # Uncomment to limit documents for testing
 
 # Derived dataset identifier (for ID generation)
 DATASET_IDENTIFIER=$(echo "$DATASET_NAME" | sed 's/.*\///')
@@ -65,7 +66,7 @@ echo "Activating virtual environment..."
 source "$VENV_PATH"
 
 echo "============================================================"
-echo "🚀 Creating Milvus datastore for $DATASET_DISPLAY_NAME dataset"
+echo "🚀 Creating Elasticsearch datastore (BM25) for $DATASET_DISPLAY_NAME dataset"
 echo "============================================================"
 echo "✨ Enhanced Features:"
 for feature in "${ENHANCED_FEATURES[@]}"; do
@@ -94,21 +95,20 @@ for i in "${!SPLITS[@]}"; do
     echo "   • ID format: $ID_FORMAT"
     echo ""
     
-    # Build arguments for first split (with --drop_old_db)
-    DROP_DB_ARG=""
+    # Build arguments for first split (with --drop_old_index)
+    DROP_INDEX_ARG=""
     if [ $i -eq 0 ]; then
-        DROP_DB_ARG="--drop_old_db"
+        DROP_INDEX_ARG="--drop_old_index"
     fi
     
-    python "$SCRIPT_DIR/datastore.py" \
+    python "$SCRIPT_DIR/datastore_bm25.py" \
         --dataset_name "$DATASET_NAME" \
         --split_name "$SPLIT" \
         --text_column "$TEXT_COLUMN" \
-        --milvus_db_path "$MILVUS_DB_PATH" \
-        --model "$EMBEDDING_MODEL" \
+        --elasticsearch_host "$ELASTICSEARCH_HOST" \
+        --elasticsearch_index_name "$ELASTICSEARCH_INDEX_NAME" \
         --preprocess_function "$PREPROCESS_FUNCTION" \
-        $DROP_DB_ARG \
-        --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
+        $DROP_INDEX_ARG \
         $MAX_DOCS_ARG
     
     echo ""
@@ -116,27 +116,10 @@ for i in "${!SPLITS[@]}"; do
     echo ""
 done
 
-# After all splits are processed, create a training DB copy
-TRAINING_DB_PATH="${MILVUS_DB_PATH%.*}_training.${MILVUS_DB_PATH##*.}"
-
-if [ -f "$TRAINING_DB_PATH" ]; then
-    echo "Deleting existing training DB at $TRAINING_DB_PATH..."
-    rm "$TRAINING_DB_PATH"
-fi
-
-# Pauses script execution for 10 seconds to ensure previous operations complete before copying the database
-sleep 10
-if [ -f "$MILVUS_DB_PATH.lock" ]; then
-    rm "$MILVUS_DB_PATH.lock"
-fi
-
-cp "$MILVUS_DB_PATH" "$TRAINING_DB_PATH"
-echo "✅ Training DB created at: $TRAINING_DB_PATH"
-
 echo "============================================================"
 echo "🎉 Datastore creation finished successfully!"
 echo "============================================================"
-echo "📁 Database location: $MILVUS_DB_PATH"
+echo "📁 Elasticsearch Index: $ELASTICSEARCH_INDEX_NAME (Host: $ELASTICSEARCH_HOST)"
 echo ""
 echo "🔧 Enhanced metadata structure includes:"
 for field in "${METADATA_FIELDS[@]}"; do
@@ -148,6 +131,5 @@ for capability in "${EVALUATION_FEATURES[@]}"; do
     echo "   • $capability"
 done
 echo ""
-echo "▶️  Next step: Run benchmarking with:"
-echo "   ./slug_search/benchmarks/run_benchmark.sh"
-echo "============================================================"
+echo "▶️  Next step: Run benchmarking with your BM25 pipeline."
+echo "============================================================" 

@@ -13,7 +13,9 @@ from slug_search.benchmarks.pipelines import EmbedderRetrieverPipeline
 
 # --- Global Document Store Configuration ---
 _document_store: Optional[MilvusDocumentStore] = None
-_default_milvus_db_path: str = "slug_search/data/milvus_hotpotqa.db"  # Default path
+_default_milvus_db_path: str = (
+    "slug_search/data/milvus_hotpotqa_better_chunking_training.db"  # Default path
+)
 _embedder_retriever_pipeline = None
 _default_embedding_model_name = "BAAI/bge-large-en-v1.5"
 _default_embedder_api_base = "http://localhost:40002/v1"

@@ -31,7 +31,7 @@ configure_search_tools(
     embedder_api_key_env_var="EMBEDDER_API_KEY",
 )
 
-BASE_MODEL_NAME = "unsloth/Qwen2.5-3B-instruct"  # Define base model name as a constant
+BASE_MODEL_NAME = "unsloth/Qwen2.5-7B-Instruct"  # Define base model name as a constant
 
 # Global configurations
 training_config = TrainingConfig(
