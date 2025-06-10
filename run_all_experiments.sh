@@ -17,7 +17,7 @@ VENV_PATH=".venv/bin/activate"
 PIPELINES_TO_RUN=("AgenticToolCallingPipeline")
 
 # Top-k values to test for retrieval pipelines
-TOP_K_VALUES_TO_TRY=(3 5)
+TOP_K_VALUES_TO_TRY=(5)
 
 # Timestamp format for main output directory
 MAIN_RUN_TIMESTAMP_FORMAT="+%Y%m%d_%H%M%S"
@@ -44,21 +44,19 @@ MILVUS_DB_PATH="slug_search/data/milvus_hotpotqa.db"
 # Benchmarking Script Behavior
 CONCURRENCY_LIMIT=70
 AGENT_CONCURRENCY_LIMIT=10
-MAX_QUERIES=2000  # Leave empty for no limit, or set a number for testing
+MAX_QUERIES=500  # Leave empty for no limit, or set a number for testing
 METRICS_TO_COMPUTE="check_answer_correctness_multi_gt;ground_truth_hit_rate;ground_truth_precision;ground_truth_count"
 ENABLE_SUMMARY=true
 
 # Agent-Specific Defaults
-AGENT_QUERY_PROMPT_TEMPLATE_KEY="default_query_prompt"
-UNKNOWN_TOOL_HANDLING_STRATEGY="break_loop"
+AGENT_QUERY_PROMPT_TEMPLATE_KEY="default_query_prompt_2"
 DEFAULT_AGENT_MAX_STEPS=5
 AGENT_LLM_SAMPLING_PARAMS=""
 DEFAULT_AGENT_SEARCH_TOOL_TOP_K=3
 DEFAULT_RAG_TOP_K_RETRIEVER=3
 
 # Agent parameter variations
-AGENT_MAX_STEPS_TO_TRY=(5 8)
-AGENT_UNKNOWN_TOOL_STRATEGIES_TO_TRY=("break_loop" "error_to_model")
+AGENT_MAX_STEPS_TO_TRY=(6)
 
 # ============================================================================
 # INITIALIZATION
@@ -151,35 +149,32 @@ for pipeline_name in "${PIPELINES_TO_RUN[@]}"; do
         # Agent pipeline with multiple parameter variations
         for top_k_value in "${TOP_K_VALUES_TO_TRY[@]}"; do
             for agent_max_step in "${AGENT_MAX_STEPS_TO_TRY[@]}"; do
-                for agent_strategy in "${AGENT_UNKNOWN_TOOL_STRATEGIES_TO_TRY[@]}"; do
-                    EXPERIMENT_NAME="${pipeline_name}_topK_${top_k_value}_steps_${agent_max_step}_strategy_${agent_strategy}"
-                    EXPERIMENT_DIR="${MAIN_OUTPUT_DIR}/${EXPERIMENT_NAME}"
-                    mkdir -p "${EXPERIMENT_DIR}"
+                EXPERIMENT_NAME="${pipeline_name}_topK_${top_k_value}_steps_${agent_max_step}"
+                EXPERIMENT_DIR="${MAIN_OUTPUT_DIR}/${EXPERIMENT_NAME}"
+                mkdir -p "${EXPERIMENT_DIR}"
 
-                    CURRENT_RESULTS_PATH="${EXPERIMENT_DIR}/results.jsonl"
-                    CURRENT_LOG_FILE="${EXPERIMENT_DIR}/benchmarking.log"
-                    
-                    pipeline_specific_args=(
-                        "--search_tool_top_k" "${top_k_value}"
-                        "--agent_query_prompt_template_key" "${AGENT_QUERY_PROMPT_TEMPLATE_KEY}"
-                        "--unknown_tool_handling_strategy" "${agent_strategy}"
-                        "--max_agent_steps" "${agent_max_step}"
-                        "--agent_llm_sampling_params" "${AGENT_LLM_SAMPLING_PARAMS}"
-                        "--top_k_retriever" "${DEFAULT_RAG_TOP_K_RETRIEVER}"
-                    )
+                CURRENT_RESULTS_PATH="${EXPERIMENT_DIR}/results.jsonl"
+                CURRENT_LOG_FILE="${EXPERIMENT_DIR}/benchmarking.log"
+                
+                pipeline_specific_args=(
+                    "--search_tool_top_k" "${top_k_value}"
+                    "--agent_query_prompt_template_key" "${AGENT_QUERY_PROMPT_TEMPLATE_KEY}"
+                    "--max_agent_steps" "${agent_max_step}"
+                    "--agent_llm_sampling_params" "${AGENT_LLM_SAMPLING_PARAMS}"
+                    "--top_k_retriever" "${DEFAULT_RAG_TOP_K_RETRIEVER}"
+                )
 
-                    cmd_args=(
-                        "python" "-m" "slug_search.benchmarks.benchmarking"
-                        "--pipeline_name" "${pipeline_name}"
-                        "--results_output_path" "${CURRENT_RESULTS_PATH}"
-                        "${current_base_cmd_args[@]}"
-                        "${pipeline_specific_args[@]}"
-                    )
+                cmd_args=(
+                    "python" "-m" "slug_search.benchmarks.benchmarking"
+                    "--pipeline_name" "${pipeline_name}"
+                    "--results_output_path" "${CURRENT_RESULTS_PATH}"
+                    "${current_base_cmd_args[@]}"
+                    "${pipeline_specific_args[@]}"
+                )
 
-                    echo "Running: ${EXPERIMENT_NAME}"
-                    "${cmd_args[@]}" > "${CURRENT_LOG_FILE}" 2>&1
-                    echo "Completed: ${EXPERIMENT_NAME}. Log: ${CURRENT_LOG_FILE}"
-                done
+                echo "Running: ${EXPERIMENT_NAME}"
+                "${cmd_args[@]}" > "${CURRENT_LOG_FILE}" 2>&1
+                echo "Completed: ${EXPERIMENT_NAME}. Log: ${CURRENT_LOG_FILE}"
             done
         done
         

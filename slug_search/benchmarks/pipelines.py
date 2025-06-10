@@ -282,7 +282,6 @@ class AgenticToolCallingPipeline(Pipe):
         agent_llm_api_base_url: str,
         agent_llm_api_key_env_var: str,
         agent_query_prompt_template_key: str,
-        unknown_tool_handling_strategy: str,
         search_tool_top_k: int = 3,
         agent_llm_sampling_params: Optional[Dict] = None,
         max_agent_steps: int = 5,
@@ -297,7 +296,6 @@ class AgenticToolCallingPipeline(Pipe):
             agent_llm_api_base_url: Base URL for the agent LLM API
             agent_llm_api_key_env_var: Environment variable name for API key
             agent_query_prompt_template_key: Key to load prompt template from prompts.json
-            unknown_tool_handling_strategy: Strategy for handling unknown tools
             search_tool_top_k: Top-k for search tool
             agent_llm_sampling_params: Optional sampling parameters for LLM
             max_agent_steps: Maximum number of agent steps
@@ -330,7 +328,6 @@ class AgenticToolCallingPipeline(Pipe):
             search_tool_top_k=search_tool_top_k,
             llm_sampling_params=agent_llm_sampling_params,
             max_agent_steps=max_agent_steps,
-            unknown_tool_handling_strategy=unknown_tool_handling_strategy,
             timeout=timeout,
         )
 

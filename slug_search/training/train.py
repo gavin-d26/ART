@@ -25,13 +25,13 @@ load_dotenv()
 
 # Configure search tools (will be updated with command line args later)
 configure_search_tools(
-    milvus_db_path="slug_search/data/milvus_hotpotqa_better_chunking_training.db",
+    milvus_db_path="slug_search/data/milvus_hotpotqa_fixed.db",
     embedding_model_name="BAAI/bge-large-en-v1.5",
     embedder_api_base="http://localhost:40002/v1",
     embedder_api_key_env_var="EMBEDDER_API_KEY",
 )
 
-BASE_MODEL_NAME = "unsloth/Qwen2.5-7B-Instruct"  # Define base model name as a constant
+BASE_MODEL_NAME = "unsloth/Qwen2.5-3B-Instruct"  # Define base model name as a constant
 
 # Global configurations
 training_config = TrainingConfig(
@@ -112,8 +112,10 @@ def log_metrics_from_trajectory_groups(
     """
     assert split in {"train", "val"}
     all_metrics = {"reward": [], "exception_rate": []}
+    max_rewards_per_group = []  # Initialize list to store max rewards for each group
     n_trajectories = 0
     for group in trajectory_groups:
+        group_rewards = []  # Collect rewards for the current group
         for t in group:
             n_trajectories += 1
             if isinstance(t, BaseException):
@@ -124,12 +126,16 @@ def log_metrics_from_trajectory_groups(
             # Add reward metric
             if hasattr(t, "reward") and t.reward is not None:
                 all_metrics["reward"].append(t.reward)
+                group_rewards.append(t.reward)  # Add to group_rewards
             # Collect other custom metrics
             if hasattr(t, "metrics") and t.metrics:
                 for metric, value in t.metrics.items():
                     if metric not in all_metrics:
                         all_metrics[metric] = []
                     all_metrics[metric].append(float(value))
+        # After iterating through all trajectories in a group, find the max reward for this group
+        if group_rewards:
+            max_rewards_per_group.append(max(group_rewards))
     # Calculate averages for all metrics
     averages = {}
     for metric, values in all_metrics.items():
@@ -159,6 +165,23 @@ def log_metrics_from_trajectory_groups(
 
     averages["reward_std_dev"] = reward_std_dev(trajectory_groups)
     averages["n_trajectories"] = n_trajectories
+
+    # Calculate average of max rewards per group and its standard deviation
+    if max_rewards_per_group:
+        import math
+
+        averages["max_group_reward"] = sum(max_rewards_per_group) / len(
+            max_rewards_per_group
+        )
+        mean_max_rewards = sum(max_rewards_per_group) / len(max_rewards_per_group)
+        var_max_rewards = sum(
+            (r - mean_max_rewards) ** 2 for r in max_rewards_per_group
+        ) / len(max_rewards_per_group)
+        averages["max_group_reward_std_dev"] = math.sqrt(var_max_rewards)
+    else:
+        averages["max_group_reward"] = 0.0
+        averages["max_group_reward_std_dev"] = 0.0
+
     # Local log file with split in name
     log_dir = Path("validation_logs")
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -432,7 +455,7 @@ if __name__ == "__main__":
 
     # Reconfigure search tools with command line arguments
     configure_search_tools(
-        milvus_db_path="slug_search/data/milvus_hotpotqa_better_chunking_training.db",
+        milvus_db_path="slug_search/data/milvus_hotpotqa_fixed.db",
         embedding_model_name="BAAI/bge-large-en-v1.5",
         embedder_api_base="http://localhost:40002/v1",
         embedder_api_key_env_var="EMBEDDER_API_KEY",

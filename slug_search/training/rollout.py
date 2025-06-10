@@ -127,6 +127,7 @@ async def rollout(
             {"role": "system", "content": model.config.system_prompt}
         )
 
+    traj.logs.append(f"Answer: {scenario.answer}")
     traj.messages_and_choices.append({"role": "user", "content": scenario.query})
 
     llm_response = None
@@ -173,9 +174,18 @@ async def rollout(
             traj.messages_and_choices.append(choice)  # type: ignore
 
         tool_calls = getattr(choice.message, "tool_calls", None) if choice else None
+
         if not tool_calls:
-            rubric.has_answer = False
-            break
+            traj.messages_and_choices.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": "no_tool_call",
+                    "name": "no_tool_call",
+                    "content": "Error parsing tool call",
+                }
+            )
+            rubric.num_tool_calls += 1
+            continue
         try:
             tool_call = tool_calls[0]
             tool_name = tool_call.function.name
@@ -185,11 +195,19 @@ async def rollout(
 
             # Early check for empty arguments
             if not tool_args_str or not tool_args_str.strip():
-                rubric.has_answer = False
-                break
+                raise Exception("Error parsing tool call arguments")
         except Exception as e:
             print(f"Error parsing tool call: {e}")
-            break
+            traj.messages_and_choices.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": "no_tool_call",
+                    "name": "no_tool_call",
+                    "content": str(e),
+                }
+            )
+            rubric.num_tool_calls += 1
+            continue
 
         if tool_name == "search_documents":
             # At this point, tool_args_str is guaranteed to be non-empty and non-whitespace

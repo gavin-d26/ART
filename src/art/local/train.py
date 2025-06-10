@@ -145,6 +145,15 @@ def get_compute_loss_fn(trainer: "GRPOTrainer") -> Callable[..., torch.Tensor]:
         mean_policy_loss = policy_loss.sum() / (assistant_mask.sum() + 1e-6)
         mean_kl = kl_div.sum() / (assistant_mask.sum() + 1e-6)
         trainer._metrics["prob_ratio"].append(prob_ratio.mean().item())
+        trainer._metrics["prob_ratio_max"].append(prob_ratio.max().item())
+        trainer._metrics["prob_ratio_min"].append(prob_ratio.min().item())
+        in_ratio = (
+            ((prob_ratio >= (1 - epsilon)) & (prob_ratio <= (1 + epsilon_high)))
+            .float()
+            .mean()
+            .item()
+        )
+        trainer._metrics["in_ratio"].append(in_ratio)
         trainer._metrics["learning_rate"].append(config.learning_rate)
         trainer._metrics["policy_loss"].append(mean_policy_loss.item())
         if config.beta > 0.0:

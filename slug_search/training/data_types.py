@@ -21,6 +21,8 @@ class TrainingConfig(BaseModel):
     gradient_accumulation_steps: int = 1
     weight_decay: float = 0.0
     max_grad_norm: float = 1.0
+    warmup_steps: int = 10
+    lr_scheduler_type: str = "constant_with_warmup"
 
 
 class PeftArgs(BaseModel):

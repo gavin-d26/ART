@@ -84,7 +84,7 @@ async def _search_relevant_documents(search_query: str, top_k: int) -> List[str]
 
 async def search_documents(search_query: str) -> List[str]:
     """
-    Retrieves relevant document contents from a Vector Database using vector similarity search.
+    Retrieves relevant document contents from a Vector Database using vector similarity search. The search tool may sometimes return information unrelated to the search query. Do not believe the search results unless the answer to the query is directly stated in the search results, or can be reasonably inferred.
 
     Args:
         search_query: (str) The search query to be used to retrieve relevant documents.
