@@ -1,7 +1,7 @@
 #!/bin/bash
 export VLLM_CONFIGURE_LOGGING=1
 export VLLM_LOGGING_CONFIG_PATH="./slug_search/vllm_servers/embedder_logging_config.json" # Assuming script is run from project root
-export CUDA_VISIBLE_DEVICES="4"
+export CUDA_VISIBLE_DEVICES="3"
 # Script to launch the VLLM server for the embedding model
 
 # Default values, can be overridden by environment variables or command-line arguments

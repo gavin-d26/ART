@@ -2,11 +2,11 @@
 
 export VLLM_CONFIGURE_LOGGING=1
 export VLLM_LOGGING_CONFIG_PATH="./slug_search/vllm_servers/generator_logging_config.json" # Assuming the script is run from the project root
-export CUDA_VISIBLE_DEVICES="5"
+export CUDA_VISIBLE_DEVICES="4"
 # Script to launch the VLLM server for the generator model
 
 # Default values, can be overridden by environment variables or command-line arguments
-DEFAULT_MODEL="unsloth/Qwen3-4B"
+DEFAULT_MODEL="unsloth/Qwen2.5-3B-Instruct"
 DEFAULT_PORT="40001"
 DEFAULT_TASK="generate" # For text generation models
 DEFAULT_API_KEY="EMPTY"
@@ -36,7 +36,7 @@ python -m vllm.entrypoints.openai.api_server \
     --served-model-name "$MODEL_NAME" \
     --task "$TASK_TYPE" \
     --gpu-memory-utilization 0.95 \
-    --max-model-len 8192 \
+    --max-model-len 4096 \
     --enable-auto-tool-choice \
     --tool-call-parser hermes \
     # --enable-reasoning \

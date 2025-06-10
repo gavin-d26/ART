@@ -23,7 +23,7 @@ TOP_K_VALUES_TO_TRY=(5)
 MAIN_RUN_TIMESTAMP_FORMAT="+%Y%m%d_%H%M%S"
 
 # Generator Configuration
-GENERATOR_MODEL="unsloth/Qwen3-4B"
+GENERATOR_MODEL="unsloth/Qwen2.5-3B-Instruct"
 GENERATOR_API_URL="http://localhost:40001/v1"
 GENERATOR_API_KEY_ENV="GENERATOR_API_KEY"
 
@@ -39,7 +39,7 @@ QUERY_COLUMN="question"
 ANSWER_COLUMN="answers"
 
 # Milvus Configuration
-MILVUS_DB_PATH="slug_search/data/milvus_hotpotqa.db"
+MILVUS_DB_PATH="slug_search/data/milvus_hotpotqa_fixed.db"
 
 # Benchmarking Script Behavior
 CONCURRENCY_LIMIT=70

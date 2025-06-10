@@ -23,7 +23,7 @@ MILVUS_DB_PATH="slug_search/data/milvus_hotpotqa_fixed.db"
 # Model configuration
 EMBEDDING_MODEL="BAAI/bge-large-en-v1.5"
 PREPROCESS_FUNCTION="preprocess_and_chunk_text"
-GPU_MEMORY_UTILIZATION="0.2"
+GPU_MEMORY_UTILIZATION="0.90"
 
 # Split configuration
 SPLITS=("train" "validation")
