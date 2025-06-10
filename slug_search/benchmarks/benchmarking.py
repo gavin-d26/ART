@@ -222,7 +222,13 @@ def parse_args():
         "--agent_query_prompt_template_key",
         type=str,
         default="default_query_prompt",
-        help="Key to load prompt template from prompts.json for the agent (template should contain {{query}} placeholder).",
+        help="Key to load query template from prompts.json for the agent (template should contain {{query}} placeholder).",
+    )
+    parser.add_argument(
+        "--agent_system_prompt_key",
+        type=str,
+        default="qwen_2.5_3b_instruct_system_prompt",
+        help="Key to load system prompt from prompts.json for the agent.",
     )
     parser.add_argument(
         "--unknown_tool_handling_strategy",
@@ -396,6 +402,7 @@ async def main():
             "agent_llm_api_base_url": args.generator_openai_api_base_url,
             "agent_llm_api_key_env_var": generator_api_key_env_name,
             "agent_query_prompt_template_key": args.agent_query_prompt_template_key,
+            "agent_system_prompt_key": args.agent_system_prompt_key,
             "unknown_tool_handling_strategy": args.unknown_tool_handling_strategy,
             "search_tool_top_k": args.search_tool_top_k,
             "max_agent_steps": args.max_agent_steps,
@@ -419,7 +426,7 @@ async def main():
         query_text, actual_answer, pipeline_instance, p_id, query_row, index
     ):
         async with semaphore:  # Acquire semaphore
-            logger.debug(f'Processing query ID {p_id}: "{query_text[:50]}..."')
+            # logger.debug(f'Processing query ID {p_id}: "{query_text[:50]}..."')
             try:
                 # pipeline_input_data is now constructed inside the pipeline's run_pipeline method
                 # Use run_pipeline() for non-blocking execution, passing only the query

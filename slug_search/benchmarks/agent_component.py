@@ -1,9 +1,8 @@
 import json
 import asyncio
+import os
 from typing import Dict, Any, Optional, List
 from haystack import component
-from haystack.components.generators.chat import OpenAIChatGenerator
-from haystack.dataclasses import ChatMessage
 from haystack.utils import Secret
 
 from langchain_core.utils.function_calling import convert_to_openai_tool
@@ -12,6 +11,8 @@ from slug_search.training.search_tools import (
     return_final_answer,
     get_or_initialize_embedder_retriever_pipeline,
 )
+
+from openai import AsyncOpenAI
 
 
 @component
@@ -26,7 +27,8 @@ class CustomAgentComponent:
         llm_model_name: str,
         llm_api_base_url: str,
         llm_api_key_env_var: str,
-        prompt_template: str,
+        system_prompt: str,
+        query_template: str,
         search_tool_top_k: int = 3,
         llm_sampling_params: Optional[Dict] = None,
         max_agent_steps: int = 5,
@@ -40,30 +42,35 @@ class CustomAgentComponent:
             llm_model_name: Name of the LLM model
             llm_api_base_url: Base URL for the LLM API
             llm_api_key_env_var: Environment variable name for API key
-            prompt_template: System prompt template
+            system_prompt: System prompt template
+            query_template: Query template with {{query}} placeholder
             search_tool_top_k: Top-k for search tool
             llm_sampling_params: Optional sampling parameters for LLM
             max_agent_steps: Maximum number of agent steps
             timeout: Timeout for LLM calls
         """
-        self.prompt_template = prompt_template
+        self.llm_model_name = llm_model_name
+        self.system_prompt = system_prompt
+        self.query_template = query_template
         self.max_agent_steps = max_agent_steps
         self.search_tool_top_k = search_tool_top_k
+        self.timeout = timeout
+        self.llm_sampling_params = llm_sampling_params or {}
 
-        # Create tools in OpenAI format
+        # Create tools in OpenAI format (for tool definitions)
         openai_search_documents = convert_to_openai_tool(search_documents)
         openai_return_final_answer = convert_to_openai_tool(return_final_answer)
         self.tools = [openai_search_documents, openai_return_final_answer]
 
-        # Create LLM chat generator with tools
-        generation_kwargs = llm_sampling_params or {}
-        self.llm_chat_generator = OpenAIChatGenerator(
-            model=llm_model_name,
-            api_base_url=llm_api_base_url,
-            api_key=Secret.from_env_var(llm_api_key_env_var),
-            tools=self.tools,
+        # Create OpenAI client for direct API calls (matching rollout.py)
+        api_key = os.getenv(llm_api_key_env_var)
+        if not api_key:
+            api_key = "EMPTY"  # Default for local VLLM servers
+
+        self.openai_client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=llm_api_base_url,
             timeout=timeout,
-            generation_kwargs=generation_kwargs,
         )
 
     @component.output_types(output_data=Dict[str, Any])
@@ -84,55 +91,96 @@ class CustomAgentComponent:
         final_generation = None
         num_tool_calls = 0
 
-        # Initialize conversation with system prompt and user query
+        # Initialize conversation with system prompt and formatted user query (matching rollout.py)
         messages = []
-        if self.prompt_template:
-            messages.append(ChatMessage.from_system(self.prompt_template))
-        messages.append(ChatMessage.from_user(query))
+        if self.system_prompt:
+            messages.append({"role": "system", "content": self.system_prompt})
+
+        # Format the query using the template (matching rollout.py behavior)
+        formatted_query = self.query_template.replace("{{query}}", query)
+        messages.append({"role": "user", "content": formatted_query})
 
         for step in range(self.max_agent_steps):
-            # Call LLM
+            # Call OpenAI API directly (matching rollout.py)
             try:
-                llm_result = self.llm_chat_generator.run(messages=messages)
+                # Extract sampling parameters
+                temperature = self.llm_sampling_params.get("temperature", 1.0)
+                top_p = self.llm_sampling_params.get("top_p", 1.0)
+                max_tokens = self.llm_sampling_params.get("max_tokens", None)
+
+                llm_response = await self.openai_client.chat.completions.create(
+                    model=self.llm_model_name,
+                    messages=messages,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_tokens=max_tokens,
+                    tools=self.tools,
+                    tool_choice="auto",
+                    timeout=self.timeout,
+                )
             except Exception as e:
                 break
 
             # Track generation tokens
-            reply = llm_result["replies"][0]
-            if reply.meta and "usage" in reply.meta:
-                total_generation_tokens += reply.meta["usage"].get(
-                    "completion_tokens", 0
-                )
+            if llm_response.usage:
+                total_generation_tokens += llm_response.usage.completion_tokens
 
-            # Check if LLM made a tool call
-            tool_calls = getattr(reply, "tool_calls", None)
+            choice = llm_response.choices[0] if llm_response.choices else None
+            if not choice:
+                break
+
+            # Add assistant message to conversation
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": choice.message.content,
+                    "tool_calls": (
+                        [
+                            {
+                                "id": tc.id,
+                                "type": tc.type,
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments,
+                                },
+                            }
+                            for tc in choice.message.tool_calls
+                        ]
+                        if choice.message.tool_calls
+                        else None
+                    ),
+                }
+            )
+
+            tool_calls = choice.message.tool_calls
             if not tool_calls:
-                # No tool call - append error and break
-                messages.append(reply)
+                # No tool call - append error and break (matching rollout.py)
                 messages.append(
-                    ChatMessage.from_tool(
-                        content="Error parsing tool call",
-                        tool_call_id="no_tool_call",
-                    )
+                    {
+                        "role": "tool",
+                        "tool_call_id": "no_tool_call",
+                        "name": "no_tool_call",
+                        "content": "Error parsing tool call",
+                    }
                 )
                 final_generation = "##no_tool_called_by_llm"
                 break
 
             # Process first tool call (matching rollout.py behavior)
             tool_call = tool_calls[0]
-            tool_name = tool_call.tool_name
-            tool_args_str = tool_call.arguments
-            tool_id = getattr(tool_call, "id", tool_call.tool_name)
+            tool_name = tool_call.function.name
+            tool_args_str = tool_call.function.arguments
+            tool_id = tool_call.id
             num_tool_calls += 1
 
             # Early check for empty arguments
             if not tool_args_str or not tool_args_str.strip():
-                messages.append(reply)
                 messages.append(
-                    ChatMessage.from_tool(
-                        content="Error parsing tool call arguments",
-                        tool_call_id=tool_id,
-                    )
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_id,
+                        "content": "Error parsing tool call arguments",
+                    }
                 )
                 continue
 
@@ -170,13 +218,13 @@ class CustomAgentComponent:
                 except Exception as e:
                     tool_result = f"Error calling tool {tool_name}: {e}"
 
-                # Add tool result to conversation
-                messages.append(reply)
+                # Add tool result to conversation (matching rollout.py)
                 messages.append(
-                    ChatMessage.from_tool(
-                        content=tool_result,
-                        tool_call_id=tool_id,
-                    )
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_id,
+                        "content": tool_result,
+                    }
                 )
                 continue
 
@@ -190,18 +238,18 @@ class CustomAgentComponent:
                         final_generation = "##no_answer_provided"
                 except Exception:
                     final_generation = "##error_parsing_final_answer"
-                # Don't append return_final_answer tool call to messages
+                # Don't append return_final_answer tool call to messages (matching rollout.py)
                 break
 
             else:
-                # Unknown tool
+                # Unknown tool (matching rollout.py)
                 tool_result = f"Unknown tool called: {tool_name}"
-                messages.append(reply)
                 messages.append(
-                    ChatMessage.from_tool(
-                        content=tool_result,
-                        tool_call_id=tool_id,
-                    )
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_id,
+                        "content": tool_result,
+                    }
                 )
                 final_generation = "##unknown_tool_called"
                 break

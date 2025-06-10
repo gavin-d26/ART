@@ -282,6 +282,7 @@ class AgenticToolCallingPipeline(Pipe):
         agent_llm_api_base_url: str,
         agent_llm_api_key_env_var: str,
         agent_query_prompt_template_key: str,
+        agent_system_prompt_key: str = "qwen_2.5_3b_instruct_system_prompt",
         search_tool_top_k: int = 3,
         agent_llm_sampling_params: Optional[Dict] = None,
         max_agent_steps: int = 5,
@@ -295,7 +296,8 @@ class AgenticToolCallingPipeline(Pipe):
             agent_llm_model_name: Name of the LLM model for the agent
             agent_llm_api_base_url: Base URL for the agent LLM API
             agent_llm_api_key_env_var: Environment variable name for API key
-            agent_query_prompt_template_key: Key to load prompt template from prompts.json
+            agent_query_prompt_template_key: Key to load query template from prompts.json
+            agent_system_prompt_key: Key to load system prompt from prompts.json
             search_tool_top_k: Top-k for search tool
             agent_llm_sampling_params: Optional sampling parameters for LLM
             max_agent_steps: Maximum number of agent steps
@@ -307,24 +309,34 @@ class AgenticToolCallingPipeline(Pipe):
         # Import here to avoid circular imports
         from slug_search.benchmarks.agent_component import CustomAgentComponent
 
-        # Load system prompt from prompts.json
+        # Load both system prompt and query template from prompts.json
         try:
             with open("slug_search/training/prompts.json", "r") as f:
                 prompts = json.load(f)
-            prompt_template = prompts.get(agent_query_prompt_template_key, "")
-            if not prompt_template:
+
+            # Load system prompt
+            system_prompt = prompts.get(agent_system_prompt_key, "")
+            if not system_prompt:
                 raise ValueError(
-                    f"Prompt template key '{agent_query_prompt_template_key}' not found in prompts.json"
+                    f"System prompt key '{agent_system_prompt_key}' not found in prompts.json"
+                )
+
+            # Load query template
+            query_template = prompts.get(agent_query_prompt_template_key, "")
+            if not query_template:
+                raise ValueError(
+                    f"Query template key '{agent_query_prompt_template_key}' not found in prompts.json"
                 )
         except Exception as e:
-            raise ValueError(f"Failed to load prompt template: {str(e)}")
+            raise ValueError(f"Failed to load prompt templates: {str(e)}")
 
         # Create the custom agent component
         custom_agent_component = CustomAgentComponent(
             llm_model_name=agent_llm_model_name,
             llm_api_base_url=agent_llm_api_base_url,
             llm_api_key_env_var=agent_llm_api_key_env_var,
-            prompt_template=prompt_template,
+            system_prompt=system_prompt,
+            query_template=query_template,
             search_tool_top_k=search_tool_top_k,
             llm_sampling_params=agent_llm_sampling_params,
             max_agent_steps=max_agent_steps,

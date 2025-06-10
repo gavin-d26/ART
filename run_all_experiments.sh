@@ -50,6 +50,7 @@ ENABLE_SUMMARY=true
 
 # Agent-Specific Defaults
 AGENT_QUERY_PROMPT_TEMPLATE_KEY="default_query_prompt_2"
+AGENT_SYSTEM_PROMPT_KEY="qwen_2.5_3b_instruct_system_prompt"
 DEFAULT_AGENT_MAX_STEPS=5
 AGENT_LLM_SAMPLING_PARAMS=""
 DEFAULT_AGENT_SEARCH_TOOL_TOP_K=3
@@ -159,6 +160,7 @@ for pipeline_name in "${PIPELINES_TO_RUN[@]}"; do
                 pipeline_specific_args=(
                     "--search_tool_top_k" "${top_k_value}"
                     "--agent_query_prompt_template_key" "${AGENT_QUERY_PROMPT_TEMPLATE_KEY}"
+                    "--agent_system_prompt_key" "${AGENT_SYSTEM_PROMPT_KEY}"
                     "--max_agent_steps" "${agent_max_step}"
                     "--agent_llm_sampling_params" "${AGENT_LLM_SAMPLING_PARAMS}"
                     "--top_k_retriever" "${DEFAULT_RAG_TOP_K_RETRIEVER}"
