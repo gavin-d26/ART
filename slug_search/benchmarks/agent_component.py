@@ -74,9 +74,21 @@ class CustomAgentComponent:
         )
 
     @component.output_types(output_data=Dict[str, Any])
-    async def run(self, query: str) -> Dict[str, Dict[str, Any]]:
+    def run(self, query: str) -> Dict[str, Dict[str, Any]]:
         """
         Run the agent loop, matching rollout.py logic.
+
+        Args:
+            query: The user query
+
+        Returns:
+            Dictionary containing generation, generation_tokens, retrieved_chunks, and tool_log
+        """
+        return asyncio.run(self._run_async(query))
+
+    async def _run_async(self, query: str) -> Dict[str, Dict[str, Any]]:
+        """
+        Internal async method that implements the agent loop logic.
 
         Args:
             query: The user query
