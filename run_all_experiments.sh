@@ -44,7 +44,7 @@ MILVUS_DB_PATH="slug_search/data/milvus_hotpotqa_fixed.db"
 # Benchmarking Script Behavior
 CONCURRENCY_LIMIT=70
 AGENT_CONCURRENCY_LIMIT=10
-MAX_QUERIES=500  # Leave empty for no limit, or set a number for testing
+MAX_QUERIES=400  # Leave empty for no limit, or set a number for testing
 METRICS_TO_COMPUTE="check_answer_correctness_multi_gt;ground_truth_hit_rate;ground_truth_precision;ground_truth_count"
 ENABLE_SUMMARY=true
 

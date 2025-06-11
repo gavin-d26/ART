@@ -134,7 +134,7 @@ async def rollout(
     final_answer = None
 
     client = model.openai_client()
-    model_name = model.config.base_model
+    model_name = model.get_inference_name() # fmt: skip # This will use the LoRA adapter name if available
     verifier = getattr(verifiers, model.config.verifier)
 
     while True:
