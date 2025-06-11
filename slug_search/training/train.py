@@ -432,7 +432,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--top_k",
         type=int,
-        default=3,
+        default=5,
         help="Number of top documents to retrieve for search (default: 3).",
     )
     args = parser.parse_args()
@@ -463,29 +463,45 @@ if __name__ == "__main__":
     )
 
     if args.debug:
-        model_name = "slug-search-agent-debug-3"
+        # fmt:off
+        model_name = "slug-search-agent-debug-80"
         project_name = "slug_search_project_debug"
 
         # Create a deep copy of the global project_policy_config for modification
         debug_project_policy_config = project_policy_config.model_copy(deep=True)
 
         # Modify attributes for debugging
-        debug_project_policy_config.max_training_samples = 30
-        debug_project_policy_config.max_val_samples = 10
+        debug_project_policy_config.max_training_samples = 10240 
+        debug_project_policy_config.max_val_samples = 50
+        debug_project_policy_config.custom_chat_template = None  # None for Qwen2.5-7B-Instruct
+        debug_project_policy_config.system_prompt = args.system_prompt
+        debug_project_policy_config.max_tokens = 4096
+        debug_project_policy_config.max_tool_calls = 6
+        # modify peft args for debugging
+        debug_project_policy_config.peft_args.r = 128
+        debug_project_policy_config.peft_args.lora_alpha = 256
+        
         # Also modify the nested training_config for debugging
-        debug_project_policy_config.training_config.eval_steps = 2
+        debug_project_policy_config.training_config.eval_steps = -1  # disable validation
         debug_project_policy_config.training_config.trajectories_per_group = 8
-        debug_project_policy_config.training_config.groups_per_step = 4
+        debug_project_policy_config.training_config.groups_per_step = 128
         debug_project_policy_config.training_config.num_epochs = 1
         debug_project_policy_config.training_config.learning_rate = 1e-6
+        debug_project_policy_config.training_config.beta = 0.001
+        debug_project_policy_config.training_config.gradient_accumulation_steps = 32
+        debug_project_policy_config.training_config.weight_decay = 0.0
+        debug_project_policy_config.training_config.max_grad_norm = 0.1
+        debug_project_policy_config.training_config.warmup_steps = 10
+        debug_project_policy_config.training_config.lr_scheduler_type = "constant_with_warmup"
 
         # Configure vLLM settings for debug mode
         debug_project_policy_config.vllm_config.enforce_eager = True
-        debug_project_policy_config.vllm_config.gpu_memory_utilization = 0.95
+        debug_project_policy_config.vllm_config.gpu_memory_utilization = 0.80
         debug_project_policy_config.vllm_config.max_model_len = (
             4096  # Smaller context for faster debugging
         )
-
+        debug_project_policy_config.vllm_config.max_num_seqs = None
+        # fmt:on
         print("Running in DEBUG mode with minimal configuration.")
         print(
             f"Debug vLLM config: enforce_eager={debug_project_policy_config.vllm_config.enforce_eager}, "
