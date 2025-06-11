@@ -199,6 +199,9 @@ def log_metrics_from_trajectory_groups(
     if wandb_api_key:
         import wandb
 
+        # Ensure W&B is properly authenticated
+        wandb.login(key=wandb_api_key, relogin=False)
+
         global _wandb_runs
         run = _wandb_runs.get(model_name)
         if run is None or getattr(run, "_is_finished", False):
@@ -464,7 +467,7 @@ if __name__ == "__main__":
 
     if args.debug:
         # fmt:off
-        model_name = "slug-search-agent-debug-80"
+        model_name = "slug-search-agent-debug-82"
         project_name = "slug_search_project_debug"
 
         # Create a deep copy of the global project_policy_config for modification
@@ -472,7 +475,7 @@ if __name__ == "__main__":
 
         # Modify attributes for debugging
         debug_project_policy_config.max_training_samples = 10240 
-        debug_project_policy_config.max_val_samples = 50
+        debug_project_policy_config.max_val_samples = 30
         debug_project_policy_config.custom_chat_template = None  # None for Qwen2.5-7B-Instruct
         debug_project_policy_config.system_prompt = args.system_prompt
         debug_project_policy_config.max_tokens = 4096
@@ -482,7 +485,7 @@ if __name__ == "__main__":
         debug_project_policy_config.peft_args.lora_alpha = 256
         
         # Also modify the nested training_config for debugging
-        debug_project_policy_config.training_config.eval_steps = -1  # disable validation
+        debug_project_policy_config.training_config.eval_steps = 10  # disable validation
         debug_project_policy_config.training_config.trajectories_per_group = 8
         debug_project_policy_config.training_config.groups_per_step = 128
         debug_project_policy_config.training_config.num_epochs = 1
@@ -491,7 +494,7 @@ if __name__ == "__main__":
         debug_project_policy_config.training_config.gradient_accumulation_steps = 32
         debug_project_policy_config.training_config.weight_decay = 0.0
         debug_project_policy_config.training_config.max_grad_norm = 0.1
-        debug_project_policy_config.training_config.warmup_steps = 10
+        debug_project_policy_config.training_config.warmup_steps = 12
         debug_project_policy_config.training_config.lr_scheduler_type = "constant_with_warmup"
 
         # Configure vLLM settings for debug mode

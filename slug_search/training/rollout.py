@@ -56,7 +56,7 @@ def calculate_reward(
     reward_for_correct_answer: float = 1.0
 
     # To reduce reward sparsity, add a bonus for each successful tool call
-    bonus_per_successful_tool_call: float = 0.1
+    bonus_per_successful_tool_call: float = 0.0
 
     # Penalty for each failed tool call
     # The original function implicitly applied -1.0 for each failed tool call
