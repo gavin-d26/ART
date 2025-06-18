@@ -55,7 +55,7 @@ class EmbeddedRAGPipeline(Pipe):
         generator_model_name: str,
         generator_api_base: str,
         generator_api_key_env_var: str,
-        top_k_retriever: int = 3,
+        top_k_retriever: int = 5,
         timeout: float = 60.0 * 10,
         **kwargs,  # Accept additional parameters for flexibility
     ):
@@ -218,7 +218,7 @@ class EmbedderRetrieverPipeline(Pipe):
         embedding_model_name: str,
         embedder_api_base: str,
         embedder_api_key_env_var: str,
-        top_k_retriever: int = 3,
+        top_k_retriever: int = 5,
         timeout: float = 60.0 * 10,
         **kwargs,  # Accept additional parameters for flexibility
     ):
@@ -283,7 +283,7 @@ class AgenticToolCallingPipeline(Pipe):
         agent_llm_api_key_env_var: str,
         agent_query_prompt_template_key: str,
         agent_system_prompt_key: str = "qwen_2.5_3b_instruct_system_prompt",
-        search_tool_top_k: int = 3,
+        search_tool_top_k: int = 5,
         agent_llm_sampling_params: Optional[Dict] = None,
         max_agent_steps: int = 5,
         timeout: float = 60.0 * 10,
