@@ -2,11 +2,11 @@
 
 export VLLM_CONFIGURE_LOGGING=1
 export VLLM_LOGGING_CONFIG_PATH="./slug_search/vllm_servers/generator_logging_config.json" # Assuming the script is run from the project root
-export CUDA_VISIBLE_DEVICES="4"
+# export CUDA_VISIBLE_DEVICES="4"
 # Script to launch the VLLM server for the generator model
 
 # Default values, can be overridden by environment variables or command-line arguments
-DEFAULT_MODEL="unsloth/Qwen2.5-3B-Instruct"
+DEFAULT_MODEL="unsloth/qwen2.5-3b-instruct-unsloth-bnb-4bit"
 DEFAULT_PORT="40001"
 DEFAULT_TASK="generate" # For text generation models
 DEFAULT_API_KEY="EMPTY"
@@ -46,17 +46,18 @@ fi
 echo "Logging to: $LOG_FILE (via VLLM_LOGGING_CONFIG_PATH)"
 echo "API Key: (Hidden for security, ensure it's set if required by your model or setup)" # VLLM uses this for client auth
 
-# Build the command with optional LoRA arguments
+# Build the command with optional LoRA arguments - simplified for stability
 VLLM_CMD="python -m vllm.entrypoints.openai.api_server \
     --model $MODEL_NAME \
     --port $PORT_NUM \
     --host 0.0.0.0 \
     --served-model-name $MODEL_NAME \
     --task $TASK_TYPE \
-    --gpu-memory-utilization 0.95 \
+    --gpu-memory-utilization 0.8 \
     --max-model-len 4096 \
     --enable-auto-tool-choice \
-    --tool-call-parser hermes"
+    --tool-call-parser hermes \
+    --enforce-eager"
 
 # Add LoRA arguments if enabled
 if [ "$ENABLE_LORA" = "true" ]; then

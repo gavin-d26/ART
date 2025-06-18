@@ -265,10 +265,37 @@ def run_training_debug_with_embedder(log_file: str = "debug80.log"):
         text=True,
     )
 
+    # Shared state for coordinating between monitoring and waiting threads
+    embedder_ready = threading.Event()
+    embedder_failed = threading.Event()
+
+    # Monitor embedder output and detect when it's ready
+    def monitor_embedder():
+        while embedder_process.poll() is None:
+            line = embedder_process.stdout.readline()
+            if line:
+                print(f"[EMBEDDER] {line.rstrip()}")
+
+                # Check if server is ready
+                if (
+                    "Application startup complete" in line
+                    or "Uvicorn running on" in line
+                ):
+                    print("🚀 Embedder server is ready!")
+                    embedder_ready.set()
+                    return
+
+        # If we get here, the process ended without signaling ready
+        embedder_failed.set()
+
     # Wait for embedder to be ready by monitoring output
     def wait_for_embedder():
-        max_wait = 120  # 5 minutes
+        max_wait = 120  # 2 minutes
         start_time = time.time()
+
+        # Start monitoring thread
+        embedder_thread = threading.Thread(target=monitor_embedder, daemon=True)
+        embedder_thread.start()
 
         # Wait for embedder process to show "Application startup complete" in its output
         while time.time() - start_time < max_wait:
@@ -276,24 +303,19 @@ def run_training_debug_with_embedder(log_file: str = "debug80.log"):
                 print("❌ Embedder process ended unexpectedly!")
                 return False
 
-            print(f"Waiting for embedder startup... ({int(time.time() - start_time)}s)")
-            time.sleep(10)
-
-            # Simple time-based check - vLLM usually starts within 60-120 seconds
-            if time.time() - start_time > 120:  # 2 minutes should be enough
-                print("✅ Embedder server should be ready!")
+            if embedder_ready.is_set():
+                print("✅ Embedder server is ready!")
                 return True
+
+            if embedder_failed.is_set():
+                print("❌ Embedder process ended without becoming ready!")
+                return False
+
+            print(f"Waiting for embedder startup... ({int(time.time() - start_time)}s)")
+            time.sleep(5)  # Check more frequently
+
+        print("❌ Embedder server startup timeout!")
         return False
-
-    # Monitor embedder output in background
-    def monitor_embedder():
-        while embedder_process.poll() is None:
-            line = embedder_process.stdout.readline()
-            if line:
-                print(f"[EMBEDDER] {line.rstrip()}")
-
-    embedder_thread = threading.Thread(target=monitor_embedder, daemon=True)
-    embedder_thread.start()
 
     if not wait_for_embedder():
         embedder_process.terminate()
